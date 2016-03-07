@@ -1,0 +1,64 @@
+{
+  "name": "cyclejs-aws-iot-driver",
+  "version": "0.0.5",
+  "description": "CycleJS driver for AWS IOT",
+  "main": "lib/index.js",
+  "scripts": {
+    "test": "npm run eslint && npm run test-browser",
+    "test-browser": "zuul --local --open -- test/index.js",
+    "eslint": "eslint src/",
+    "uglify": "uglifyjs dist/cyclejs-aws-iot-driver.js -o dist/cyclejs-aws-iot-driver.min.js",
+    "browserify": "browserify src/index.js -t babelify -t browserify-shim --standalone CycleAwsIotDriver --exclude rx --outfile dist/cyclejs-aws-iot-driver.js",
+    "dist": "npm run browserify && npm run uglify",
+    "docs": "node ./scripts/make-api-docs.js",
+    "babel": "babel -d lib src",
+    "prepublish": "npm run babel && npm run dist"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jemmyw/cyclejs-aws-iot-driver.git"
+  },
+  "keywords": [
+    "cyclejs",
+    "aws",
+    "iot",
+    "mqtt",
+    "websockets"
+  ],
+  "author": "Jeremy Wells <jemmyw@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/jemmyw/cyclejs-aws-iot-driver/issues"
+  },
+  "homepage": "https://github.com/jemmyw/cyclejs-aws-iot-driver#readme",
+  "devDependencies": {
+    "babel-cli": "^6.5.1",
+    "babel-preset-es2015": "^6.5.0",
+    "babel-preset-stage-0": "^6.5.0",
+    "babelify": "^7.2.0",
+    "browserify": "^13.0.0",
+    "browserify-shim": "^3.8.12",
+    "eslint": "^1.9.0",
+    "eslint-config-cycle": "^3.2.0",
+    "markdox": "^0.1.10",
+    "mocha": "^2.4.5",
+    "uglify-js": "^2.6.2",
+    "unexpected": "^10.9.1",
+    "zuul": "^3.9.0"
+  },
+  "dependencies": {
+    "mqtt": "^1.7.3",
+    "ramda": "^0.19.1",
+    "rx": "^4.0.8"
+  },
+  "peerDependencies": {
+    "moment": "> 2.11.0",
+    "crypto-js": "> 3.1.0"
+  },
+  "optionalPeerDependencies": {
+    "aws-sdk": "^2.2.41"
+  },
+  "browserify-shim": {
+    "rx": "global:Rx"
+  }
+}
