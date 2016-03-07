@@ -50,7 +50,7 @@ The input observable takes publish messages in the form ```{ topic:
 #### Subscribing
 
 The output observable exposes a topic function that subscribes to a topic and
-returns an observable of the topoic:
+returns an observable of the topic:
 
 ```
 sources.Iot.topic('the/topic')
