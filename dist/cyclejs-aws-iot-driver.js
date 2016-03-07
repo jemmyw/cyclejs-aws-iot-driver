@@ -30440,23 +30440,27 @@ function makeIotDriver(options) {
   });
   var credentials = AWS.config.credentials;
 
-  var url$ = _rx.Observable.fromFunc(credentials.get, credentials, function (err) {
-    if (err) {
-      return new Error(err);
-    }
-
+  var url$ = _rx.Observable.fromNodeCallback(credentials.get, credentials).map(function () {
     var requestUrl = _sig2.default.getSignedUrl('wss', options.endpoint, '/mqtt', 'iotdevicegateway', options.region, credentials.accessKeyId, credentials.secretAccessKey, credentials.sessionToken);
 
     return requestUrl;
-  }).share();
+  });
 
   var client$ = url$.map(function (url) {
     return _mqtt2.default.connect(url);
   }).shareReplay(1);
+
+  client$.subscribe(function (client) {
+    client.on('connect', function () {
+      return console.log('iot client connected');
+    });
+  });
+
   var messages$ = _rx.Observable.create(function (obs) {
     var client = void 0;
 
     var listener = function listener(topic, message) {
+      console.log('message received!');
       obs.onNext({ topic: topic, message: message });
     };
 

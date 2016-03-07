@@ -1,6 +1,6 @@
 {
   "name": "cyclejs-aws-iot-driver",
-  "version": "0.0.5",
+  "version": "0.0.1",
   "description": "CycleJS driver for AWS IOT",
   "main": "lib/index.js",
   "scripts": {
@@ -12,6 +12,7 @@
     "dist": "npm run browserify && npm run uglify",
     "docs": "node ./scripts/make-api-docs.js",
     "babel": "babel -d lib src",
+    "watch": "babel --watch -d lib src",
     "prepublish": "npm run babel && npm run dist"
   },
   "repository": {
@@ -59,6 +60,7 @@
     "aws-sdk": "^2.2.41"
   },
   "browserify-shim": {
-    "rx": "global:Rx"
+    "rx": "global:Rx",
+    "AWS": "global:AWS"
   }
 }
