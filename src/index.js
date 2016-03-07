@@ -7,6 +7,72 @@ import {Observable, Subject, ReplaySubject} from 'rx'
 import '../vendor/aws-sdk'
 const AWS = window.AWS
 
+/**
+* ## CycleJS driver for AWS IoT MQTT
+*
+* This is a driver for cyclejs that connects to AWS IoT MQTT and allows
+* subscribing and publishing to topics.
+*
+* At present this only supports an anonymous AWS cognito connection.
+*
+* Instructions to get started:
+*
+* 1. Get the endpoint address from IOT:
+*   aws iot describe-endpoint
+*
+* 2. Create an identity pool:
+*   aws cognito-identity --allow-unauthenticated-identities \
+*   --developer-provider-name login.mycompany.myapp
+*
+* 3. Plug the endpoint and identity pool guid into the driver:
+*
+* ```
+* const drivers = {
+*   Iot: makeIotDriver({
+*     region: 'us-east-1',
+*     endpoint: 'abc.iot.us-east-1.amazonaws.com',
+*     identityPoolId: 'abc-123-efef-456'
+*   })
+* }
+* ```
+*
+* ### Usage:
+*
+* #### Publishing
+*
+* The input observable takes publish messages in the form ```{ topic:
+* 'the/topic', message: 'the message' }```. The message must be a string.
+*
+* #### Subscribing
+*
+* The output observable exposes a topic function that subscribes to a topic and
+* returns an observable of the topoic:
+*
+* ```
+* sources.Iot.topic('the/topic')
+*   .subscribe(m =>
+*     console.log('got message"', m.message, '"on topic', m.topic))
+*
+* return {
+*   Iot: Observable.of({topic: 'the/topic', message: 'a message to publish'})
+* }
+* ```
+*
+* In the above case the expected output would be ```got message "a message to
+* publish" on topic the/topic```
+*
+* Note that messages from all subscribed topics are available on the ouput
+* observable:
+*
+* ```
+* sources.Iot.topic('topic1').subscribe()
+* sources.Iot.topic('topic2').subscribe()
+*
+* // Log messages from topic1 and topic2 to the console
+* sources.Iot.subscribe(m => console.log(m.message))
+* ```
+*/
+
 function makeConnector(credentials, options) {
   return Observable.create(obs => {
     const onConnect = client => () => obs.onNext(client)
@@ -32,6 +98,13 @@ function makeConnector(credentials, options) {
   })
 }
 
+/**
+ * @param {object} options
+ * @param {string} object.region The AWS region
+ * @param {string} object.identityPoolId The cognito identity pool id
+ * @param {string} object.endpoint The AWS IoT endpoint
+ * @return {function}
+ */
 function makeIotDriver(options) {
   if (!options.region) { throw new Error('Specify a region') }
   if (!options.identityPoolId) {
@@ -98,6 +171,9 @@ function makeIotDriver(options) {
     return dispose
   })
 
+  /**
+  * Subscribe to a topic
+  */
   function subscribeTopic(topic) {
     subscriptionSource$.onNext(topic)
 
@@ -105,6 +181,11 @@ function makeIotDriver(options) {
       .filter(R.propEq('topic', topic))
   }
 
+  /**
+  * @param {Observable} events$ A stream of publish events, should be in the
+  *   format of ```{topic: 'topic_name', message: 'message string'}```
+  * @returns {Observable} Observable of messages from all subscribed topics
+  */
   return function iotDriver(events$) {
     events$.subscribe(event => publishSource$.onNext(event))
 
