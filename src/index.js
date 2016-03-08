@@ -99,7 +99,9 @@ function makeConnector(credentials, options) {
 }
 
 /**
- * @param {object} options
+ * @param {object} options - region, IdentityPoolId and endpoint are required,
+ *   any other properties are passed to the AWS.CognitoIdentityCredentials
+ *   object.
  * @param {string} object.region The AWS region
  * @param {string} object.IdentityPoolId The cognito identity pool id
  * @param {string} object.endpoint The AWS IoT endpoint
@@ -114,9 +116,13 @@ function makeIotDriver(options) {
 
   AWS.config.region = options.region
 
-  const credentials$ = Observable.of(options).map(opts =>
+  const credentials$ = Observable.of(options)
+    .map(R.apply(R.compose,
+      R.map(R.dissoc, ['region', 'IdentityPoolId', 'endpoint'])))
+    .map(opts =>
     new AWS.CognitoIdentityCredentials({
-      IdentityPoolId: `${opts.region}:${opts.IdentityPoolId}`,
+      ...opts,
+      IdentityPoolId: `${options.region}:${options.IdentityPoolId}`,
     }))
   const client$ = credentials$
     .map(credentials =>

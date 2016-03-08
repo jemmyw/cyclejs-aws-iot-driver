@@ -30401,7 +30401,8 @@ Object.defineProperty(exports, "__esModule", {
 });
 exports.makeIotDriver = undefined;
 
-var _slicedToArray = function () { function sliceIterator(arr, i) { var _arr = []; var _n = true; var _d = false; var _e = undefined; try { for (var _i = arr[Symbol.iterator](), _s; !(_n = (_s = _i.next()).done); _n = true) { _arr.push(_s.value); if (i && _arr.length === i) break; } } catch (err) { _d = true; _e = err; } finally { try { if (!_n && _i["return"]) _i["return"](); } finally { if (_d) throw _e; } } return _arr; } return function (arr, i) { if (Array.isArray(arr)) { return arr; } else if (Symbol.iterator in Object(arr)) { return sliceIterator(arr, i); } else { throw new TypeError("Invalid attempt to destructure non-iterable instance"); } }; }();
+var _extends = Object.assign || function (target) { for (var i = 1; i < arguments.length; i++) { var source = arguments[i]; for (var key in source) { if (Object.prototype.hasOwnProperty.call(source, key)) { target[key] = source[key]; } } } return target; }; /* eslint no-use-before-define: 0 */
+
 
 var _sig = require('./sig');
 
@@ -30423,83 +30424,195 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 
 var AWS = window.AWS;
 
+/**
+* ## CycleJS driver for AWS IoT MQTT
+*
+* This is a driver for cyclejs that connects to AWS IoT MQTT and allows
+* subscribing and publishing to topics.
+*
+* At present this only supports an anonymous AWS cognito connection.
+*
+* Instructions to get started:
+*
+* 1. Get the endpoint address from IOT:
+*   aws iot describe-endpoint
+*
+* 2. Create an identity pool:
+*   aws cognito-identity --allow-unauthenticated-identities \
+*   --developer-provider-name login.mycompany.myapp
+*
+* 3. Plug the endpoint and identity pool guid into the driver:
+*
+* ```
+* const drivers = {
+*   Iot: makeIotDriver({
+*     region: 'us-east-1',
+*     endpoint: 'abc.iot.us-east-1.amazonaws.com',
+*     identityPoolId: 'abc-123-efef-456'
+*   })
+* }
+* ```
+*
+* ### Usage:
+*
+* #### Publishing
+*
+* The input observable takes publish messages in the form ```{ topic:
+* 'the/topic', message: 'the message' }```. The message must be a string.
+*
+* #### Subscribing
+*
+* The output observable exposes a topic function that subscribes to a topic and
+* returns an observable of the topic:
+*
+* ```
+* sources.Iot.topic('the/topic')
+*   .subscribe(m =>
+*     console.log('got message"', m.message, '"on topic', m.topic))
+*
+* return {
+*   Iot: Observable.of({topic: 'the/topic', message: 'a message to publish'})
+* }
+* ```
+*
+* In the above case the expected output would be ```got message "a message to
+* publish" on topic the/topic```
+*
+* Note that messages from all subscribed topics are available on the ouput
+* observable:
+*
+* ```
+* sources.Iot.topic('topic1').subscribe()
+* sources.Iot.topic('topic2').subscribe()
+*
+* // Log messages from topic1 and topic2 to the console
+* sources.Iot.subscribe(m => console.log(m.message))
+* ```
+*/
+
+function makeConnector(credentials, options) {
+  return _rx.Observable.create(function (obs) {
+    var onConnect = function onConnect(client) {
+      return function () {
+        return obs.onNext(client);
+      };
+    };
+
+    credentials.get(function (err) {
+      if (err) {
+        return obs.onError(err);
+      }
+
+      var requestUrl = _sig2.default.getSignedUrl('wss', options.endpoint, '/mqtt', 'iotdevicegateway', options.region, credentials.accessKeyId, credentials.secretAccessKey, credentials.sessionToken);
+
+      var client = _mqtt2.default.connect(requestUrl);
+      client.once('connect', onConnect(client));
+    });
+  });
+}
+
+/**
+ * @param {object} options - region, IdentityPoolId and endpoint are required,
+ *   any other properties are passed to the AWS.CognitoIdentityCredentials
+ *   object.
+ * @param {string} object.region The AWS region
+ * @param {string} object.IdentityPoolId The cognito identity pool id
+ * @param {string} object.endpoint The AWS IoT endpoint
+ * @return {function}
+ */
 function makeIotDriver(options) {
   if (!options.region) {
     throw new Error('Specify a region');
   }
-  if (!options.identityPoolId) {
-    throw new Error('Specify an identityPoolId, the cognito guid');
+  if (!options.IdentityPoolId) {
+    throw new Error('Specify an IdentityPoolId, the cognito guid');
   }
   if (!options.endpoint) {
     throw new Error('Specify an IOT endpoint');
   }
 
   AWS.config.region = options.region;
-  AWS.config.credentials = new AWS.CognitoIdentityCredentials({
-    IdentityPoolId: options.region + ':' + options.IdentityPoolId
+
+  var credentials$ = _rx.Observable.of(options).map(_ramda2.default.apply(_ramda2.default.compose, _ramda2.default.map(_ramda2.default.dissoc, ['region', 'IdentityPoolId', 'endpoint']))).map(function (opts) {
+    return new AWS.CognitoIdentityCredentials(_extends({}, opts, {
+      IdentityPoolId: options.region + ':' + options.IdentityPoolId
+    }));
   });
-  var credentials = AWS.config.credentials;
+  var client$ = credentials$.map(function (credentials) {
+    return makeConnector(credentials, options);
+  }).mergeAll();
 
-  var url$ = _rx.Observable.fromNodeCallback(credentials.get, credentials).map(function () {
-    var requestUrl = _sig2.default.getSignedUrl('wss', options.endpoint, '/mqtt', 'iotdevicegateway', options.region, credentials.accessKeyId, credentials.secretAccessKey, credentials.sessionToken);
-
-    return requestUrl;
-  });
-
-  var client$ = url$.map(function (url) {
-    return _mqtt2.default.connect(url);
-  }).shareReplay(1);
-
-  client$.subscribe(function (client) {
-    client.on('connect', function () {
-      return console.log('iot client connected');
-    });
-  });
+  var subscriptionSource$ = new _rx.ReplaySubject();
+  var subscription$ = subscriptionSource$.distinct();
+  var publishSource$ = new _rx.Subject();
+  var publish$ = publishSource$.share();
 
   var messages$ = _rx.Observable.create(function (obs) {
-    var client = void 0;
-
-    var listener = function listener(topic, message) {
-      console.log('message received!');
-      obs.onNext({ topic: topic, message: message });
+    var messageListener = function messageListener(topic, message) {
+      obs.onNext({ topic: topic, message: message.toString() });
     };
 
-    var dispose = function dispose() {
-      return client && client.removeListener('message', listener);
+    var disposables = [];
+
+    var clientSub = function clientSub(client) {
+      disposables.push(subscription$.subscribe(function (topic) {
+        return client.subscribe(topic);
+      }));
+
+      disposables.push(publish$.subscribe(function (message) {
+        return client.publish(message.topic, message.message, message.options);
+      }));
+
+      disposables.push({
+        dispose: function dispose() {
+          client.removeAllListeners();
+          client.end({ force: true });
+        } });
+
+      client.once('reconnect', function () {
+        resubscribe();
+      });
+
+      client.on('message', messageListener);
     };
 
-    client$.subscribe(function (newClient) {
+    function dispose() {
+      disposables.forEach(function (disposable) {
+        return disposable.dispose();
+      });
+    }
+
+    function resubscribe() {
       dispose();
-      client = newClient;
-      client.on('message', listener);
-    });
+      disposables.push(client$.subscribe(clientSub));
+    }
+
+    resubscribe();
 
     return dispose;
-  }).share();
+  });
 
-  function subscribe(topic) {
-    client$.subscribe(function (client) {
-      return client.subscribe(topic);
-    });
+  /**
+  * Subscribe to a topic
+  */
+  function subscribeTopic(topic) {
+    subscriptionSource$.onNext(topic);
 
     return messages$.filter(_ramda2.default.propEq('topic', topic));
   }
 
-  function publish(client, message) {
-    client.publish(message.topic, message.message, message.options);
-  }
-
-  return function iotDriver(publish$) {
-    publish$.withLatestFrom(client$).subscribe(function (_ref) {
-      var _ref2 = _slicedToArray(_ref, 2);
-
-      var event = _ref2[0];
-      var client = _ref2[1];
-      return publish(client, event);
+  /**
+  * @param {Observable} events$ A stream of publish events, should be in the
+  *   format of ```{topic: 'topic_name', message: 'message string'}```
+  * @returns {Observable} Observable of messages from all subscribed topics
+  */
+  return function iotDriver(events$) {
+    events$.subscribe(function (event) {
+      return publishSource$.onNext(event);
     });
 
-    var out$ = messages$.map(_ramda2.default.identity);
-    out$.subscribe = subscribe;
+    var out$ = messages$.map(_ramda2.default.identity).share();
+    out$.topic = subscribeTopic;
 
     return out$;
   };
