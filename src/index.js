@@ -101,14 +101,14 @@ function makeConnector(credentials, options) {
 /**
  * @param {object} options
  * @param {string} object.region The AWS region
- * @param {string} object.identityPoolId The cognito identity pool id
+ * @param {string} object.IdentityPoolId The cognito identity pool id
  * @param {string} object.endpoint The AWS IoT endpoint
  * @return {function}
  */
 function makeIotDriver(options) {
   if (!options.region) { throw new Error('Specify a region') }
-  if (!options.identityPoolId) {
-    throw new Error('Specify an identityPoolId, the cognito guid')
+  if (!options.IdentityPoolId) {
+    throw new Error('Specify an IdentityPoolId, the cognito guid')
   }
   if (!options.endpoint) { throw new Error('Specify an IOT endpoint') }
 
@@ -116,7 +116,7 @@ function makeIotDriver(options) {
 
   const credentials$ = Observable.of(options).map(opts =>
     new AWS.CognitoIdentityCredentials({
-      IdentityPoolId: `${opts.region}:${opts.identityPoolId}`,
+      IdentityPoolId: `${opts.region}:${opts.IdentityPoolId}`,
     }))
   const client$ = credentials$
     .map(credentials =>
