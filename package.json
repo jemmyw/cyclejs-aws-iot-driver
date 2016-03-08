@@ -1,6 +1,6 @@
 {
   "name": "cyclejs-aws-iot-driver",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "CycleJS driver for AWS IOT",
   "main": "lib/index.js",
   "scripts": {
