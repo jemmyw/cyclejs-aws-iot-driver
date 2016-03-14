@@ -92,7 +92,11 @@ function makeConnector(credentials, options) {
         credentials.secretAccessKey,
         credentials.sessionToken)
 
-      const client = mqtt.connect(requestUrl)
+      const client = mqtt.connect(requestUrl, {
+        keepalive: 30,
+        reconnectPeriod: 0, // don't reconnect here, allow whole new connection
+                            // so that request url is regenerated
+      })
       client.once('connect', onConnect(client))
     })
   })
@@ -156,7 +160,7 @@ function makeIotDriver(options) {
           client.end({force: true})
         }})
 
-      client.once('reconnect', () => {
+      client.once('close', () => {
         resubscribe()
       })
 
