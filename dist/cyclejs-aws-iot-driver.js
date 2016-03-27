@@ -339,7 +339,7 @@ BufferList.prototype.destroy = function () {
 module.exports = BufferList
 
 }).call(this,require("buffer").Buffer)
-},{"buffer":4,"readable-stream/duplex":75,"util":99}],3:[function(require,module,exports){
+},{"buffer":4,"readable-stream/duplex":47,"util":71}],3:[function(require,module,exports){
 
 },{}],4:[function(require,module,exports){
 (function (global){
@@ -1807,7 +1807,7 @@ function blitBuffer (src, dst, offset, length) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"base64-js":1,"ieee754":51,"isarray":5}],5:[function(require,module,exports){
+},{"base64-js":1,"ieee754":23,"isarray":5}],5:[function(require,module,exports){
 var toString = {}.toString;
 
 module.exports = Array.isArray || function (arr) {
@@ -1925,1111 +1925,7 @@ function objectToString(o) {
 }
 
 }).call(this,{"isBuffer":require("../../is-buffer/index.js")})
-},{"../../is-buffer/index.js":53}],7:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./enc-base64"), require("./md5"), require("./evpkdf"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./enc-base64", "./md5", "./evpkdf", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var BlockCipher = C_lib.BlockCipher;
-	    var C_algo = C.algo;
-
-	    // Lookup tables
-	    var SBOX = [];
-	    var INV_SBOX = [];
-	    var SUB_MIX_0 = [];
-	    var SUB_MIX_1 = [];
-	    var SUB_MIX_2 = [];
-	    var SUB_MIX_3 = [];
-	    var INV_SUB_MIX_0 = [];
-	    var INV_SUB_MIX_1 = [];
-	    var INV_SUB_MIX_2 = [];
-	    var INV_SUB_MIX_3 = [];
-
-	    // Compute lookup tables
-	    (function () {
-	        // Compute double table
-	        var d = [];
-	        for (var i = 0; i < 256; i++) {
-	            if (i < 128) {
-	                d[i] = i << 1;
-	            } else {
-	                d[i] = (i << 1) ^ 0x11b;
-	            }
-	        }
-
-	        // Walk GF(2^8)
-	        var x = 0;
-	        var xi = 0;
-	        for (var i = 0; i < 256; i++) {
-	            // Compute sbox
-	            var sx = xi ^ (xi << 1) ^ (xi << 2) ^ (xi << 3) ^ (xi << 4);
-	            sx = (sx >>> 8) ^ (sx & 0xff) ^ 0x63;
-	            SBOX[x] = sx;
-	            INV_SBOX[sx] = x;
-
-	            // Compute multiplication
-	            var x2 = d[x];
-	            var x4 = d[x2];
-	            var x8 = d[x4];
-
-	            // Compute sub bytes, mix columns tables
-	            var t = (d[sx] * 0x101) ^ (sx * 0x1010100);
-	            SUB_MIX_0[x] = (t << 24) | (t >>> 8);
-	            SUB_MIX_1[x] = (t << 16) | (t >>> 16);
-	            SUB_MIX_2[x] = (t << 8)  | (t >>> 24);
-	            SUB_MIX_3[x] = t;
-
-	            // Compute inv sub bytes, inv mix columns tables
-	            var t = (x8 * 0x1010101) ^ (x4 * 0x10001) ^ (x2 * 0x101) ^ (x * 0x1010100);
-	            INV_SUB_MIX_0[sx] = (t << 24) | (t >>> 8);
-	            INV_SUB_MIX_1[sx] = (t << 16) | (t >>> 16);
-	            INV_SUB_MIX_2[sx] = (t << 8)  | (t >>> 24);
-	            INV_SUB_MIX_3[sx] = t;
-
-	            // Compute next counter
-	            if (!x) {
-	                x = xi = 1;
-	            } else {
-	                x = x2 ^ d[d[d[x8 ^ x2]]];
-	                xi ^= d[d[xi]];
-	            }
-	        }
-	    }());
-
-	    // Precomputed Rcon lookup
-	    var RCON = [0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80, 0x1b, 0x36];
-
-	    /**
-	     * AES block cipher algorithm.
-	     */
-	    var AES = C_algo.AES = BlockCipher.extend({
-	        _doReset: function () {
-	            // Shortcuts
-	            var key = this._key;
-	            var keyWords = key.words;
-	            var keySize = key.sigBytes / 4;
-
-	            // Compute number of rounds
-	            var nRounds = this._nRounds = keySize + 6
-
-	            // Compute number of key schedule rows
-	            var ksRows = (nRounds + 1) * 4;
-
-	            // Compute key schedule
-	            var keySchedule = this._keySchedule = [];
-	            for (var ksRow = 0; ksRow < ksRows; ksRow++) {
-	                if (ksRow < keySize) {
-	                    keySchedule[ksRow] = keyWords[ksRow];
-	                } else {
-	                    var t = keySchedule[ksRow - 1];
-
-	                    if (!(ksRow % keySize)) {
-	                        // Rot word
-	                        t = (t << 8) | (t >>> 24);
-
-	                        // Sub word
-	                        t = (SBOX[t >>> 24] << 24) | (SBOX[(t >>> 16) & 0xff] << 16) | (SBOX[(t >>> 8) & 0xff] << 8) | SBOX[t & 0xff];
-
-	                        // Mix Rcon
-	                        t ^= RCON[(ksRow / keySize) | 0] << 24;
-	                    } else if (keySize > 6 && ksRow % keySize == 4) {
-	                        // Sub word
-	                        t = (SBOX[t >>> 24] << 24) | (SBOX[(t >>> 16) & 0xff] << 16) | (SBOX[(t >>> 8) & 0xff] << 8) | SBOX[t & 0xff];
-	                    }
-
-	                    keySchedule[ksRow] = keySchedule[ksRow - keySize] ^ t;
-	                }
-	            }
-
-	            // Compute inv key schedule
-	            var invKeySchedule = this._invKeySchedule = [];
-	            for (var invKsRow = 0; invKsRow < ksRows; invKsRow++) {
-	                var ksRow = ksRows - invKsRow;
-
-	                if (invKsRow % 4) {
-	                    var t = keySchedule[ksRow];
-	                } else {
-	                    var t = keySchedule[ksRow - 4];
-	                }
-
-	                if (invKsRow < 4 || ksRow <= 4) {
-	                    invKeySchedule[invKsRow] = t;
-	                } else {
-	                    invKeySchedule[invKsRow] = INV_SUB_MIX_0[SBOX[t >>> 24]] ^ INV_SUB_MIX_1[SBOX[(t >>> 16) & 0xff]] ^
-	                                               INV_SUB_MIX_2[SBOX[(t >>> 8) & 0xff]] ^ INV_SUB_MIX_3[SBOX[t & 0xff]];
-	                }
-	            }
-	        },
-
-	        encryptBlock: function (M, offset) {
-	            this._doCryptBlock(M, offset, this._keySchedule, SUB_MIX_0, SUB_MIX_1, SUB_MIX_2, SUB_MIX_3, SBOX);
-	        },
-
-	        decryptBlock: function (M, offset) {
-	            // Swap 2nd and 4th rows
-	            var t = M[offset + 1];
-	            M[offset + 1] = M[offset + 3];
-	            M[offset + 3] = t;
-
-	            this._doCryptBlock(M, offset, this._invKeySchedule, INV_SUB_MIX_0, INV_SUB_MIX_1, INV_SUB_MIX_2, INV_SUB_MIX_3, INV_SBOX);
-
-	            // Inv swap 2nd and 4th rows
-	            var t = M[offset + 1];
-	            M[offset + 1] = M[offset + 3];
-	            M[offset + 3] = t;
-	        },
-
-	        _doCryptBlock: function (M, offset, keySchedule, SUB_MIX_0, SUB_MIX_1, SUB_MIX_2, SUB_MIX_3, SBOX) {
-	            // Shortcut
-	            var nRounds = this._nRounds;
-
-	            // Get input, add round key
-	            var s0 = M[offset]     ^ keySchedule[0];
-	            var s1 = M[offset + 1] ^ keySchedule[1];
-	            var s2 = M[offset + 2] ^ keySchedule[2];
-	            var s3 = M[offset + 3] ^ keySchedule[3];
-
-	            // Key schedule row counter
-	            var ksRow = 4;
-
-	            // Rounds
-	            for (var round = 1; round < nRounds; round++) {
-	                // Shift rows, sub bytes, mix columns, add round key
-	                var t0 = SUB_MIX_0[s0 >>> 24] ^ SUB_MIX_1[(s1 >>> 16) & 0xff] ^ SUB_MIX_2[(s2 >>> 8) & 0xff] ^ SUB_MIX_3[s3 & 0xff] ^ keySchedule[ksRow++];
-	                var t1 = SUB_MIX_0[s1 >>> 24] ^ SUB_MIX_1[(s2 >>> 16) & 0xff] ^ SUB_MIX_2[(s3 >>> 8) & 0xff] ^ SUB_MIX_3[s0 & 0xff] ^ keySchedule[ksRow++];
-	                var t2 = SUB_MIX_0[s2 >>> 24] ^ SUB_MIX_1[(s3 >>> 16) & 0xff] ^ SUB_MIX_2[(s0 >>> 8) & 0xff] ^ SUB_MIX_3[s1 & 0xff] ^ keySchedule[ksRow++];
-	                var t3 = SUB_MIX_0[s3 >>> 24] ^ SUB_MIX_1[(s0 >>> 16) & 0xff] ^ SUB_MIX_2[(s1 >>> 8) & 0xff] ^ SUB_MIX_3[s2 & 0xff] ^ keySchedule[ksRow++];
-
-	                // Update state
-	                s0 = t0;
-	                s1 = t1;
-	                s2 = t2;
-	                s3 = t3;
-	            }
-
-	            // Shift rows, sub bytes, add round key
-	            var t0 = ((SBOX[s0 >>> 24] << 24) | (SBOX[(s1 >>> 16) & 0xff] << 16) | (SBOX[(s2 >>> 8) & 0xff] << 8) | SBOX[s3 & 0xff]) ^ keySchedule[ksRow++];
-	            var t1 = ((SBOX[s1 >>> 24] << 24) | (SBOX[(s2 >>> 16) & 0xff] << 16) | (SBOX[(s3 >>> 8) & 0xff] << 8) | SBOX[s0 & 0xff]) ^ keySchedule[ksRow++];
-	            var t2 = ((SBOX[s2 >>> 24] << 24) | (SBOX[(s3 >>> 16) & 0xff] << 16) | (SBOX[(s0 >>> 8) & 0xff] << 8) | SBOX[s1 & 0xff]) ^ keySchedule[ksRow++];
-	            var t3 = ((SBOX[s3 >>> 24] << 24) | (SBOX[(s0 >>> 16) & 0xff] << 16) | (SBOX[(s1 >>> 8) & 0xff] << 8) | SBOX[s2 & 0xff]) ^ keySchedule[ksRow++];
-
-	            // Set output
-	            M[offset]     = t0;
-	            M[offset + 1] = t1;
-	            M[offset + 2] = t2;
-	            M[offset + 3] = t3;
-	        },
-
-	        keySize: 256/32
-	    });
-
-	    /**
-	     * Shortcut functions to the cipher's object interface.
-	     *
-	     * @example
-	     *
-	     *     var ciphertext = CryptoJS.AES.encrypt(message, key, cfg);
-	     *     var plaintext  = CryptoJS.AES.decrypt(ciphertext, key, cfg);
-	     */
-	    C.AES = BlockCipher._createHelper(AES);
-	}());
-
-
-	return CryptoJS.AES;
-
-}));
-},{"./cipher-core":8,"./core":9,"./enc-base64":10,"./evpkdf":12,"./md5":17}],8:[function(require,module,exports){
-;(function (root, factory) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * Cipher core components.
-	 */
-	CryptoJS.lib.Cipher || (function (undefined) {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var Base = C_lib.Base;
-	    var WordArray = C_lib.WordArray;
-	    var BufferedBlockAlgorithm = C_lib.BufferedBlockAlgorithm;
-	    var C_enc = C.enc;
-	    var Utf8 = C_enc.Utf8;
-	    var Base64 = C_enc.Base64;
-	    var C_algo = C.algo;
-	    var EvpKDF = C_algo.EvpKDF;
-
-	    /**
-	     * Abstract base cipher template.
-	     *
-	     * @property {number} keySize This cipher's key size. Default: 4 (128 bits)
-	     * @property {number} ivSize This cipher's IV size. Default: 4 (128 bits)
-	     * @property {number} _ENC_XFORM_MODE A constant representing encryption mode.
-	     * @property {number} _DEC_XFORM_MODE A constant representing decryption mode.
-	     */
-	    var Cipher = C_lib.Cipher = BufferedBlockAlgorithm.extend({
-	        /**
-	         * Configuration options.
-	         *
-	         * @property {WordArray} iv The IV to use for this operation.
-	         */
-	        cfg: Base.extend(),
-
-	        /**
-	         * Creates this cipher in encryption mode.
-	         *
-	         * @param {WordArray} key The key.
-	         * @param {Object} cfg (Optional) The configuration options to use for this operation.
-	         *
-	         * @return {Cipher} A cipher instance.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var cipher = CryptoJS.algo.AES.createEncryptor(keyWordArray, { iv: ivWordArray });
-	         */
-	        createEncryptor: function (key, cfg) {
-	            return this.create(this._ENC_XFORM_MODE, key, cfg);
-	        },
-
-	        /**
-	         * Creates this cipher in decryption mode.
-	         *
-	         * @param {WordArray} key The key.
-	         * @param {Object} cfg (Optional) The configuration options to use for this operation.
-	         *
-	         * @return {Cipher} A cipher instance.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var cipher = CryptoJS.algo.AES.createDecryptor(keyWordArray, { iv: ivWordArray });
-	         */
-	        createDecryptor: function (key, cfg) {
-	            return this.create(this._DEC_XFORM_MODE, key, cfg);
-	        },
-
-	        /**
-	         * Initializes a newly created cipher.
-	         *
-	         * @param {number} xformMode Either the encryption or decryption transormation mode constant.
-	         * @param {WordArray} key The key.
-	         * @param {Object} cfg (Optional) The configuration options to use for this operation.
-	         *
-	         * @example
-	         *
-	         *     var cipher = CryptoJS.algo.AES.create(CryptoJS.algo.AES._ENC_XFORM_MODE, keyWordArray, { iv: ivWordArray });
-	         */
-	        init: function (xformMode, key, cfg) {
-	            // Apply config defaults
-	            this.cfg = this.cfg.extend(cfg);
-
-	            // Store transform mode and key
-	            this._xformMode = xformMode;
-	            this._key = key;
-
-	            // Set initial values
-	            this.reset();
-	        },
-
-	        /**
-	         * Resets this cipher to its initial state.
-	         *
-	         * @example
-	         *
-	         *     cipher.reset();
-	         */
-	        reset: function () {
-	            // Reset data buffer
-	            BufferedBlockAlgorithm.reset.call(this);
-
-	            // Perform concrete-cipher logic
-	            this._doReset();
-	        },
-
-	        /**
-	         * Adds data to be encrypted or decrypted.
-	         *
-	         * @param {WordArray|string} dataUpdate The data to encrypt or decrypt.
-	         *
-	         * @return {WordArray} The data after processing.
-	         *
-	         * @example
-	         *
-	         *     var encrypted = cipher.process('data');
-	         *     var encrypted = cipher.process(wordArray);
-	         */
-	        process: function (dataUpdate) {
-	            // Append
-	            this._append(dataUpdate);
-
-	            // Process available blocks
-	            return this._process();
-	        },
-
-	        /**
-	         * Finalizes the encryption or decryption process.
-	         * Note that the finalize operation is effectively a destructive, read-once operation.
-	         *
-	         * @param {WordArray|string} dataUpdate The final data to encrypt or decrypt.
-	         *
-	         * @return {WordArray} The data after final processing.
-	         *
-	         * @example
-	         *
-	         *     var encrypted = cipher.finalize();
-	         *     var encrypted = cipher.finalize('data');
-	         *     var encrypted = cipher.finalize(wordArray);
-	         */
-	        finalize: function (dataUpdate) {
-	            // Final data update
-	            if (dataUpdate) {
-	                this._append(dataUpdate);
-	            }
-
-	            // Perform concrete-cipher logic
-	            var finalProcessedData = this._doFinalize();
-
-	            return finalProcessedData;
-	        },
-
-	        keySize: 128/32,
-
-	        ivSize: 128/32,
-
-	        _ENC_XFORM_MODE: 1,
-
-	        _DEC_XFORM_MODE: 2,
-
-	        /**
-	         * Creates shortcut functions to a cipher's object interface.
-	         *
-	         * @param {Cipher} cipher The cipher to create a helper for.
-	         *
-	         * @return {Object} An object with encrypt and decrypt shortcut functions.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var AES = CryptoJS.lib.Cipher._createHelper(CryptoJS.algo.AES);
-	         */
-	        _createHelper: (function () {
-	            function selectCipherStrategy(key) {
-	                if (typeof key == 'string') {
-	                    return PasswordBasedCipher;
-	                } else {
-	                    return SerializableCipher;
-	                }
-	            }
-
-	            return function (cipher) {
-	                return {
-	                    encrypt: function (message, key, cfg) {
-	                        return selectCipherStrategy(key).encrypt(cipher, message, key, cfg);
-	                    },
-
-	                    decrypt: function (ciphertext, key, cfg) {
-	                        return selectCipherStrategy(key).decrypt(cipher, ciphertext, key, cfg);
-	                    }
-	                };
-	            };
-	        }())
-	    });
-
-	    /**
-	     * Abstract base stream cipher template.
-	     *
-	     * @property {number} blockSize The number of 32-bit words this cipher operates on. Default: 1 (32 bits)
-	     */
-	    var StreamCipher = C_lib.StreamCipher = Cipher.extend({
-	        _doFinalize: function () {
-	            // Process partial blocks
-	            var finalProcessedBlocks = this._process(!!'flush');
-
-	            return finalProcessedBlocks;
-	        },
-
-	        blockSize: 1
-	    });
-
-	    /**
-	     * Mode namespace.
-	     */
-	    var C_mode = C.mode = {};
-
-	    /**
-	     * Abstract base block cipher mode template.
-	     */
-	    var BlockCipherMode = C_lib.BlockCipherMode = Base.extend({
-	        /**
-	         * Creates this mode for encryption.
-	         *
-	         * @param {Cipher} cipher A block cipher instance.
-	         * @param {Array} iv The IV words.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var mode = CryptoJS.mode.CBC.createEncryptor(cipher, iv.words);
-	         */
-	        createEncryptor: function (cipher, iv) {
-	            return this.Encryptor.create(cipher, iv);
-	        },
-
-	        /**
-	         * Creates this mode for decryption.
-	         *
-	         * @param {Cipher} cipher A block cipher instance.
-	         * @param {Array} iv The IV words.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var mode = CryptoJS.mode.CBC.createDecryptor(cipher, iv.words);
-	         */
-	        createDecryptor: function (cipher, iv) {
-	            return this.Decryptor.create(cipher, iv);
-	        },
-
-	        /**
-	         * Initializes a newly created mode.
-	         *
-	         * @param {Cipher} cipher A block cipher instance.
-	         * @param {Array} iv The IV words.
-	         *
-	         * @example
-	         *
-	         *     var mode = CryptoJS.mode.CBC.Encryptor.create(cipher, iv.words);
-	         */
-	        init: function (cipher, iv) {
-	            this._cipher = cipher;
-	            this._iv = iv;
-	        }
-	    });
-
-	    /**
-	     * Cipher Block Chaining mode.
-	     */
-	    var CBC = C_mode.CBC = (function () {
-	        /**
-	         * Abstract base CBC mode.
-	         */
-	        var CBC = BlockCipherMode.extend();
-
-	        /**
-	         * CBC encryptor.
-	         */
-	        CBC.Encryptor = CBC.extend({
-	            /**
-	             * Processes the data block at offset.
-	             *
-	             * @param {Array} words The data words to operate on.
-	             * @param {number} offset The offset where the block starts.
-	             *
-	             * @example
-	             *
-	             *     mode.processBlock(data.words, offset);
-	             */
-	            processBlock: function (words, offset) {
-	                // Shortcuts
-	                var cipher = this._cipher;
-	                var blockSize = cipher.blockSize;
-
-	                // XOR and encrypt
-	                xorBlock.call(this, words, offset, blockSize);
-	                cipher.encryptBlock(words, offset);
-
-	                // Remember this block to use with next block
-	                this._prevBlock = words.slice(offset, offset + blockSize);
-	            }
-	        });
-
-	        /**
-	         * CBC decryptor.
-	         */
-	        CBC.Decryptor = CBC.extend({
-	            /**
-	             * Processes the data block at offset.
-	             *
-	             * @param {Array} words The data words to operate on.
-	             * @param {number} offset The offset where the block starts.
-	             *
-	             * @example
-	             *
-	             *     mode.processBlock(data.words, offset);
-	             */
-	            processBlock: function (words, offset) {
-	                // Shortcuts
-	                var cipher = this._cipher;
-	                var blockSize = cipher.blockSize;
-
-	                // Remember this block to use with next block
-	                var thisBlock = words.slice(offset, offset + blockSize);
-
-	                // Decrypt and XOR
-	                cipher.decryptBlock(words, offset);
-	                xorBlock.call(this, words, offset, blockSize);
-
-	                // This block becomes the previous block
-	                this._prevBlock = thisBlock;
-	            }
-	        });
-
-	        function xorBlock(words, offset, blockSize) {
-	            // Shortcut
-	            var iv = this._iv;
-
-	            // Choose mixing block
-	            if (iv) {
-	                var block = iv;
-
-	                // Remove IV for subsequent blocks
-	                this._iv = undefined;
-	            } else {
-	                var block = this._prevBlock;
-	            }
-
-	            // XOR blocks
-	            for (var i = 0; i < blockSize; i++) {
-	                words[offset + i] ^= block[i];
-	            }
-	        }
-
-	        return CBC;
-	    }());
-
-	    /**
-	     * Padding namespace.
-	     */
-	    var C_pad = C.pad = {};
-
-	    /**
-	     * PKCS #5/7 padding strategy.
-	     */
-	    var Pkcs7 = C_pad.Pkcs7 = {
-	        /**
-	         * Pads data using the algorithm defined in PKCS #5/7.
-	         *
-	         * @param {WordArray} data The data to pad.
-	         * @param {number} blockSize The multiple that the data should be padded to.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     CryptoJS.pad.Pkcs7.pad(wordArray, 4);
-	         */
-	        pad: function (data, blockSize) {
-	            // Shortcut
-	            var blockSizeBytes = blockSize * 4;
-
-	            // Count padding bytes
-	            var nPaddingBytes = blockSizeBytes - data.sigBytes % blockSizeBytes;
-
-	            // Create padding word
-	            var paddingWord = (nPaddingBytes << 24) | (nPaddingBytes << 16) | (nPaddingBytes << 8) | nPaddingBytes;
-
-	            // Create padding
-	            var paddingWords = [];
-	            for (var i = 0; i < nPaddingBytes; i += 4) {
-	                paddingWords.push(paddingWord);
-	            }
-	            var padding = WordArray.create(paddingWords, nPaddingBytes);
-
-	            // Add padding
-	            data.concat(padding);
-	        },
-
-	        /**
-	         * Unpads data that had been padded using the algorithm defined in PKCS #5/7.
-	         *
-	         * @param {WordArray} data The data to unpad.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     CryptoJS.pad.Pkcs7.unpad(wordArray);
-	         */
-	        unpad: function (data) {
-	            // Get number of padding bytes from last byte
-	            var nPaddingBytes = data.words[(data.sigBytes - 1) >>> 2] & 0xff;
-
-	            // Remove padding
-	            data.sigBytes -= nPaddingBytes;
-	        }
-	    };
-
-	    /**
-	     * Abstract base block cipher template.
-	     *
-	     * @property {number} blockSize The number of 32-bit words this cipher operates on. Default: 4 (128 bits)
-	     */
-	    var BlockCipher = C_lib.BlockCipher = Cipher.extend({
-	        /**
-	         * Configuration options.
-	         *
-	         * @property {Mode} mode The block mode to use. Default: CBC
-	         * @property {Padding} padding The padding strategy to use. Default: Pkcs7
-	         */
-	        cfg: Cipher.cfg.extend({
-	            mode: CBC,
-	            padding: Pkcs7
-	        }),
-
-	        reset: function () {
-	            // Reset cipher
-	            Cipher.reset.call(this);
-
-	            // Shortcuts
-	            var cfg = this.cfg;
-	            var iv = cfg.iv;
-	            var mode = cfg.mode;
-
-	            // Reset block mode
-	            if (this._xformMode == this._ENC_XFORM_MODE) {
-	                var modeCreator = mode.createEncryptor;
-	            } else /* if (this._xformMode == this._DEC_XFORM_MODE) */ {
-	                var modeCreator = mode.createDecryptor;
-
-	                // Keep at least one block in the buffer for unpadding
-	                this._minBufferSize = 1;
-	            }
-	            this._mode = modeCreator.call(mode, this, iv && iv.words);
-	        },
-
-	        _doProcessBlock: function (words, offset) {
-	            this._mode.processBlock(words, offset);
-	        },
-
-	        _doFinalize: function () {
-	            // Shortcut
-	            var padding = this.cfg.padding;
-
-	            // Finalize
-	            if (this._xformMode == this._ENC_XFORM_MODE) {
-	                // Pad data
-	                padding.pad(this._data, this.blockSize);
-
-	                // Process final blocks
-	                var finalProcessedBlocks = this._process(!!'flush');
-	            } else /* if (this._xformMode == this._DEC_XFORM_MODE) */ {
-	                // Process final blocks
-	                var finalProcessedBlocks = this._process(!!'flush');
-
-	                // Unpad data
-	                padding.unpad(finalProcessedBlocks);
-	            }
-
-	            return finalProcessedBlocks;
-	        },
-
-	        blockSize: 128/32
-	    });
-
-	    /**
-	     * A collection of cipher parameters.
-	     *
-	     * @property {WordArray} ciphertext The raw ciphertext.
-	     * @property {WordArray} key The key to this ciphertext.
-	     * @property {WordArray} iv The IV used in the ciphering operation.
-	     * @property {WordArray} salt The salt used with a key derivation function.
-	     * @property {Cipher} algorithm The cipher algorithm.
-	     * @property {Mode} mode The block mode used in the ciphering operation.
-	     * @property {Padding} padding The padding scheme used in the ciphering operation.
-	     * @property {number} blockSize The block size of the cipher.
-	     * @property {Format} formatter The default formatting strategy to convert this cipher params object to a string.
-	     */
-	    var CipherParams = C_lib.CipherParams = Base.extend({
-	        /**
-	         * Initializes a newly created cipher params object.
-	         *
-	         * @param {Object} cipherParams An object with any of the possible cipher parameters.
-	         *
-	         * @example
-	         *
-	         *     var cipherParams = CryptoJS.lib.CipherParams.create({
-	         *         ciphertext: ciphertextWordArray,
-	         *         key: keyWordArray,
-	         *         iv: ivWordArray,
-	         *         salt: saltWordArray,
-	         *         algorithm: CryptoJS.algo.AES,
-	         *         mode: CryptoJS.mode.CBC,
-	         *         padding: CryptoJS.pad.PKCS7,
-	         *         blockSize: 4,
-	         *         formatter: CryptoJS.format.OpenSSL
-	         *     });
-	         */
-	        init: function (cipherParams) {
-	            this.mixIn(cipherParams);
-	        },
-
-	        /**
-	         * Converts this cipher params object to a string.
-	         *
-	         * @param {Format} formatter (Optional) The formatting strategy to use.
-	         *
-	         * @return {string} The stringified cipher params.
-	         *
-	         * @throws Error If neither the formatter nor the default formatter is set.
-	         *
-	         * @example
-	         *
-	         *     var string = cipherParams + '';
-	         *     var string = cipherParams.toString();
-	         *     var string = cipherParams.toString(CryptoJS.format.OpenSSL);
-	         */
-	        toString: function (formatter) {
-	            return (formatter || this.formatter).stringify(this);
-	        }
-	    });
-
-	    /**
-	     * Format namespace.
-	     */
-	    var C_format = C.format = {};
-
-	    /**
-	     * OpenSSL formatting strategy.
-	     */
-	    var OpenSSLFormatter = C_format.OpenSSL = {
-	        /**
-	         * Converts a cipher params object to an OpenSSL-compatible string.
-	         *
-	         * @param {CipherParams} cipherParams The cipher params object.
-	         *
-	         * @return {string} The OpenSSL-compatible string.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var openSSLString = CryptoJS.format.OpenSSL.stringify(cipherParams);
-	         */
-	        stringify: function (cipherParams) {
-	            // Shortcuts
-	            var ciphertext = cipherParams.ciphertext;
-	            var salt = cipherParams.salt;
-
-	            // Format
-	            if (salt) {
-	                var wordArray = WordArray.create([0x53616c74, 0x65645f5f]).concat(salt).concat(ciphertext);
-	            } else {
-	                var wordArray = ciphertext;
-	            }
-
-	            return wordArray.toString(Base64);
-	        },
-
-	        /**
-	         * Converts an OpenSSL-compatible string to a cipher params object.
-	         *
-	         * @param {string} openSSLStr The OpenSSL-compatible string.
-	         *
-	         * @return {CipherParams} The cipher params object.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var cipherParams = CryptoJS.format.OpenSSL.parse(openSSLString);
-	         */
-	        parse: function (openSSLStr) {
-	            // Parse base64
-	            var ciphertext = Base64.parse(openSSLStr);
-
-	            // Shortcut
-	            var ciphertextWords = ciphertext.words;
-
-	            // Test for salt
-	            if (ciphertextWords[0] == 0x53616c74 && ciphertextWords[1] == 0x65645f5f) {
-	                // Extract salt
-	                var salt = WordArray.create(ciphertextWords.slice(2, 4));
-
-	                // Remove salt from ciphertext
-	                ciphertextWords.splice(0, 4);
-	                ciphertext.sigBytes -= 16;
-	            }
-
-	            return CipherParams.create({ ciphertext: ciphertext, salt: salt });
-	        }
-	    };
-
-	    /**
-	     * A cipher wrapper that returns ciphertext as a serializable cipher params object.
-	     */
-	    var SerializableCipher = C_lib.SerializableCipher = Base.extend({
-	        /**
-	         * Configuration options.
-	         *
-	         * @property {Formatter} format The formatting strategy to convert cipher param objects to and from a string. Default: OpenSSL
-	         */
-	        cfg: Base.extend({
-	            format: OpenSSLFormatter
-	        }),
-
-	        /**
-	         * Encrypts a message.
-	         *
-	         * @param {Cipher} cipher The cipher algorithm to use.
-	         * @param {WordArray|string} message The message to encrypt.
-	         * @param {WordArray} key The key.
-	         * @param {Object} cfg (Optional) The configuration options to use for this operation.
-	         *
-	         * @return {CipherParams} A cipher params object.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var ciphertextParams = CryptoJS.lib.SerializableCipher.encrypt(CryptoJS.algo.AES, message, key);
-	         *     var ciphertextParams = CryptoJS.lib.SerializableCipher.encrypt(CryptoJS.algo.AES, message, key, { iv: iv });
-	         *     var ciphertextParams = CryptoJS.lib.SerializableCipher.encrypt(CryptoJS.algo.AES, message, key, { iv: iv, format: CryptoJS.format.OpenSSL });
-	         */
-	        encrypt: function (cipher, message, key, cfg) {
-	            // Apply config defaults
-	            cfg = this.cfg.extend(cfg);
-
-	            // Encrypt
-	            var encryptor = cipher.createEncryptor(key, cfg);
-	            var ciphertext = encryptor.finalize(message);
-
-	            // Shortcut
-	            var cipherCfg = encryptor.cfg;
-
-	            // Create and return serializable cipher params
-	            return CipherParams.create({
-	                ciphertext: ciphertext,
-	                key: key,
-	                iv: cipherCfg.iv,
-	                algorithm: cipher,
-	                mode: cipherCfg.mode,
-	                padding: cipherCfg.padding,
-	                blockSize: cipher.blockSize,
-	                formatter: cfg.format
-	            });
-	        },
-
-	        /**
-	         * Decrypts serialized ciphertext.
-	         *
-	         * @param {Cipher} cipher The cipher algorithm to use.
-	         * @param {CipherParams|string} ciphertext The ciphertext to decrypt.
-	         * @param {WordArray} key The key.
-	         * @param {Object} cfg (Optional) The configuration options to use for this operation.
-	         *
-	         * @return {WordArray} The plaintext.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var plaintext = CryptoJS.lib.SerializableCipher.decrypt(CryptoJS.algo.AES, formattedCiphertext, key, { iv: iv, format: CryptoJS.format.OpenSSL });
-	         *     var plaintext = CryptoJS.lib.SerializableCipher.decrypt(CryptoJS.algo.AES, ciphertextParams, key, { iv: iv, format: CryptoJS.format.OpenSSL });
-	         */
-	        decrypt: function (cipher, ciphertext, key, cfg) {
-	            // Apply config defaults
-	            cfg = this.cfg.extend(cfg);
-
-	            // Convert string to CipherParams
-	            ciphertext = this._parse(ciphertext, cfg.format);
-
-	            // Decrypt
-	            var plaintext = cipher.createDecryptor(key, cfg).finalize(ciphertext.ciphertext);
-
-	            return plaintext;
-	        },
-
-	        /**
-	         * Converts serialized ciphertext to CipherParams,
-	         * else assumed CipherParams already and returns ciphertext unchanged.
-	         *
-	         * @param {CipherParams|string} ciphertext The ciphertext.
-	         * @param {Formatter} format The formatting strategy to use to parse serialized ciphertext.
-	         *
-	         * @return {CipherParams} The unserialized ciphertext.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var ciphertextParams = CryptoJS.lib.SerializableCipher._parse(ciphertextStringOrParams, format);
-	         */
-	        _parse: function (ciphertext, format) {
-	            if (typeof ciphertext == 'string') {
-	                return format.parse(ciphertext, this);
-	            } else {
-	                return ciphertext;
-	            }
-	        }
-	    });
-
-	    /**
-	     * Key derivation function namespace.
-	     */
-	    var C_kdf = C.kdf = {};
-
-	    /**
-	     * OpenSSL key derivation function.
-	     */
-	    var OpenSSLKdf = C_kdf.OpenSSL = {
-	        /**
-	         * Derives a key and IV from a password.
-	         *
-	         * @param {string} password The password to derive from.
-	         * @param {number} keySize The size in words of the key to generate.
-	         * @param {number} ivSize The size in words of the IV to generate.
-	         * @param {WordArray|string} salt (Optional) A 64-bit salt to use. If omitted, a salt will be generated randomly.
-	         *
-	         * @return {CipherParams} A cipher params object with the key, IV, and salt.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var derivedParams = CryptoJS.kdf.OpenSSL.execute('Password', 256/32, 128/32);
-	         *     var derivedParams = CryptoJS.kdf.OpenSSL.execute('Password', 256/32, 128/32, 'saltsalt');
-	         */
-	        execute: function (password, keySize, ivSize, salt) {
-	            // Generate random salt
-	            if (!salt) {
-	                salt = WordArray.random(64/8);
-	            }
-
-	            // Derive key and IV
-	            var key = EvpKDF.create({ keySize: keySize + ivSize }).compute(password, salt);
-
-	            // Separate key and IV
-	            var iv = WordArray.create(key.words.slice(keySize), ivSize * 4);
-	            key.sigBytes = keySize * 4;
-
-	            // Return params
-	            return CipherParams.create({ key: key, iv: iv, salt: salt });
-	        }
-	    };
-
-	    /**
-	     * A serializable cipher wrapper that derives the key from a password,
-	     * and returns ciphertext as a serializable cipher params object.
-	     */
-	    var PasswordBasedCipher = C_lib.PasswordBasedCipher = SerializableCipher.extend({
-	        /**
-	         * Configuration options.
-	         *
-	         * @property {KDF} kdf The key derivation function to use to generate a key and IV from a password. Default: OpenSSL
-	         */
-	        cfg: SerializableCipher.cfg.extend({
-	            kdf: OpenSSLKdf
-	        }),
-
-	        /**
-	         * Encrypts a message using a password.
-	         *
-	         * @param {Cipher} cipher The cipher algorithm to use.
-	         * @param {WordArray|string} message The message to encrypt.
-	         * @param {string} password The password.
-	         * @param {Object} cfg (Optional) The configuration options to use for this operation.
-	         *
-	         * @return {CipherParams} A cipher params object.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var ciphertextParams = CryptoJS.lib.PasswordBasedCipher.encrypt(CryptoJS.algo.AES, message, 'password');
-	         *     var ciphertextParams = CryptoJS.lib.PasswordBasedCipher.encrypt(CryptoJS.algo.AES, message, 'password', { format: CryptoJS.format.OpenSSL });
-	         */
-	        encrypt: function (cipher, message, password, cfg) {
-	            // Apply config defaults
-	            cfg = this.cfg.extend(cfg);
-
-	            // Derive key and other params
-	            var derivedParams = cfg.kdf.execute(password, cipher.keySize, cipher.ivSize);
-
-	            // Add IV to config
-	            cfg.iv = derivedParams.iv;
-
-	            // Encrypt
-	            var ciphertext = SerializableCipher.encrypt.call(this, cipher, message, derivedParams.key, cfg);
-
-	            // Mix in derived params
-	            ciphertext.mixIn(derivedParams);
-
-	            return ciphertext;
-	        },
-
-	        /**
-	         * Decrypts serialized ciphertext using a password.
-	         *
-	         * @param {Cipher} cipher The cipher algorithm to use.
-	         * @param {CipherParams|string} ciphertext The ciphertext to decrypt.
-	         * @param {string} password The password.
-	         * @param {Object} cfg (Optional) The configuration options to use for this operation.
-	         *
-	         * @return {WordArray} The plaintext.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var plaintext = CryptoJS.lib.PasswordBasedCipher.decrypt(CryptoJS.algo.AES, formattedCiphertext, 'password', { format: CryptoJS.format.OpenSSL });
-	         *     var plaintext = CryptoJS.lib.PasswordBasedCipher.decrypt(CryptoJS.algo.AES, ciphertextParams, 'password', { format: CryptoJS.format.OpenSSL });
-	         */
-	        decrypt: function (cipher, ciphertext, password, cfg) {
-	            // Apply config defaults
-	            cfg = this.cfg.extend(cfg);
-
-	            // Convert string to CipherParams
-	            ciphertext = this._parse(ciphertext, cfg.format);
-
-	            // Derive key and other params
-	            var derivedParams = cfg.kdf.execute(password, cipher.keySize, cipher.ivSize, ciphertext.salt);
-
-	            // Add IV to config
-	            cfg.iv = derivedParams.iv;
-
-	            // Decrypt
-	            var plaintext = SerializableCipher.decrypt.call(this, cipher, ciphertext, derivedParams.key, cfg);
-
-	            return plaintext;
-	        }
-	    });
-	}());
-
-
-}));
-},{"./core":9}],9:[function(require,module,exports){
+},{"../../is-buffer/index.js":25}],7:[function(require,module,exports){
 ;(function (root, factory) {
 	if (typeof exports === "object") {
 		// CommonJS
@@ -3772,7 +2668,7 @@ function objectToString(o) {
 	return CryptoJS;
 
 }));
-},{}],10:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 ;(function (root, factory) {
 	if (typeof exports === "object") {
 		// CommonJS
@@ -3788,274 +2684,18 @@ function objectToString(o) {
 	}
 }(this, function (CryptoJS) {
 
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var WordArray = C_lib.WordArray;
-	    var C_enc = C.enc;
-
-	    /**
-	     * Base64 encoding strategy.
-	     */
-	    var Base64 = C_enc.Base64 = {
-	        /**
-	         * Converts a word array to a Base64 string.
-	         *
-	         * @param {WordArray} wordArray The word array.
-	         *
-	         * @return {string} The Base64 string.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var base64String = CryptoJS.enc.Base64.stringify(wordArray);
-	         */
-	        stringify: function (wordArray) {
-	            // Shortcuts
-	            var words = wordArray.words;
-	            var sigBytes = wordArray.sigBytes;
-	            var map = this._map;
-
-	            // Clamp excess bits
-	            wordArray.clamp();
-
-	            // Convert
-	            var base64Chars = [];
-	            for (var i = 0; i < sigBytes; i += 3) {
-	                var byte1 = (words[i >>> 2]       >>> (24 - (i % 4) * 8))       & 0xff;
-	                var byte2 = (words[(i + 1) >>> 2] >>> (24 - ((i + 1) % 4) * 8)) & 0xff;
-	                var byte3 = (words[(i + 2) >>> 2] >>> (24 - ((i + 2) % 4) * 8)) & 0xff;
-
-	                var triplet = (byte1 << 16) | (byte2 << 8) | byte3;
-
-	                for (var j = 0; (j < 4) && (i + j * 0.75 < sigBytes); j++) {
-	                    base64Chars.push(map.charAt((triplet >>> (6 * (3 - j))) & 0x3f));
-	                }
-	            }
-
-	            // Add padding
-	            var paddingChar = map.charAt(64);
-	            if (paddingChar) {
-	                while (base64Chars.length % 4) {
-	                    base64Chars.push(paddingChar);
-	                }
-	            }
-
-	            return base64Chars.join('');
-	        },
-
-	        /**
-	         * Converts a Base64 string to a word array.
-	         *
-	         * @param {string} base64Str The Base64 string.
-	         *
-	         * @return {WordArray} The word array.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var wordArray = CryptoJS.enc.Base64.parse(base64String);
-	         */
-	        parse: function (base64Str) {
-	            // Shortcuts
-	            var base64StrLength = base64Str.length;
-	            var map = this._map;
-
-	            // Ignore padding
-	            var paddingChar = map.charAt(64);
-	            if (paddingChar) {
-	                var paddingIndex = base64Str.indexOf(paddingChar);
-	                if (paddingIndex != -1) {
-	                    base64StrLength = paddingIndex;
-	                }
-	            }
-
-	            // Convert
-	            var words = [];
-	            var nBytes = 0;
-	            for (var i = 0; i < base64StrLength; i++) {
-	                if (i % 4) {
-	                    var bits1 = map.indexOf(base64Str.charAt(i - 1)) << ((i % 4) * 2);
-	                    var bits2 = map.indexOf(base64Str.charAt(i)) >>> (6 - (i % 4) * 2);
-	                    var bitsCombined = bits1 | bits2;
-	                    words[nBytes >>> 2] |= (bitsCombined) << (24 - (nBytes % 4) * 8);
-	                    nBytes++;
-	                }
-	            }
-
-	            return WordArray.create(words, nBytes);
-	        },
-
-	        _map: 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='
-	    };
-	}());
-
-
-	return CryptoJS.enc.Base64;
+	return CryptoJS.enc.Hex;
 
 }));
-},{"./core":9}],11:[function(require,module,exports){
-;(function (root, factory) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var WordArray = C_lib.WordArray;
-	    var C_enc = C.enc;
-
-	    /**
-	     * UTF-16 BE encoding strategy.
-	     */
-	    var Utf16BE = C_enc.Utf16 = C_enc.Utf16BE = {
-	        /**
-	         * Converts a word array to a UTF-16 BE string.
-	         *
-	         * @param {WordArray} wordArray The word array.
-	         *
-	         * @return {string} The UTF-16 BE string.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var utf16String = CryptoJS.enc.Utf16.stringify(wordArray);
-	         */
-	        stringify: function (wordArray) {
-	            // Shortcuts
-	            var words = wordArray.words;
-	            var sigBytes = wordArray.sigBytes;
-
-	            // Convert
-	            var utf16Chars = [];
-	            for (var i = 0; i < sigBytes; i += 2) {
-	                var codePoint = (words[i >>> 2] >>> (16 - (i % 4) * 8)) & 0xffff;
-	                utf16Chars.push(String.fromCharCode(codePoint));
-	            }
-
-	            return utf16Chars.join('');
-	        },
-
-	        /**
-	         * Converts a UTF-16 BE string to a word array.
-	         *
-	         * @param {string} utf16Str The UTF-16 BE string.
-	         *
-	         * @return {WordArray} The word array.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var wordArray = CryptoJS.enc.Utf16.parse(utf16String);
-	         */
-	        parse: function (utf16Str) {
-	            // Shortcut
-	            var utf16StrLength = utf16Str.length;
-
-	            // Convert
-	            var words = [];
-	            for (var i = 0; i < utf16StrLength; i++) {
-	                words[i >>> 1] |= utf16Str.charCodeAt(i) << (16 - (i % 2) * 16);
-	            }
-
-	            return WordArray.create(words, utf16StrLength * 2);
-	        }
-	    };
-
-	    /**
-	     * UTF-16 LE encoding strategy.
-	     */
-	    C_enc.Utf16LE = {
-	        /**
-	         * Converts a word array to a UTF-16 LE string.
-	         *
-	         * @param {WordArray} wordArray The word array.
-	         *
-	         * @return {string} The UTF-16 LE string.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var utf16Str = CryptoJS.enc.Utf16LE.stringify(wordArray);
-	         */
-	        stringify: function (wordArray) {
-	            // Shortcuts
-	            var words = wordArray.words;
-	            var sigBytes = wordArray.sigBytes;
-
-	            // Convert
-	            var utf16Chars = [];
-	            for (var i = 0; i < sigBytes; i += 2) {
-	                var codePoint = swapEndian((words[i >>> 2] >>> (16 - (i % 4) * 8)) & 0xffff);
-	                utf16Chars.push(String.fromCharCode(codePoint));
-	            }
-
-	            return utf16Chars.join('');
-	        },
-
-	        /**
-	         * Converts a UTF-16 LE string to a word array.
-	         *
-	         * @param {string} utf16Str The UTF-16 LE string.
-	         *
-	         * @return {WordArray} The word array.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var wordArray = CryptoJS.enc.Utf16LE.parse(utf16Str);
-	         */
-	        parse: function (utf16Str) {
-	            // Shortcut
-	            var utf16StrLength = utf16Str.length;
-
-	            // Convert
-	            var words = [];
-	            for (var i = 0; i < utf16StrLength; i++) {
-	                words[i >>> 1] |= swapEndian(utf16Str.charCodeAt(i) << (16 - (i % 2) * 16));
-	            }
-
-	            return WordArray.create(words, utf16StrLength * 2);
-	        }
-	    };
-
-	    function swapEndian(word) {
-	        return ((word << 8) & 0xff00ff00) | ((word >>> 8) & 0x00ff00ff);
-	    }
-	}());
-
-
-	return CryptoJS.enc.Utf16;
-
-}));
-},{"./core":9}],12:[function(require,module,exports){
+},{"./core":7}],9:[function(require,module,exports){
 ;(function (root, factory, undef) {
 	if (typeof exports === "object") {
 		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./sha1"), require("./hmac"));
+		module.exports = exports = factory(require("./core"), require("./sha256"), require("./hmac"));
 	}
 	else if (typeof define === "function" && define.amd) {
 		// AMD
-		define(["./core", "./sha1", "./hmac"], factory);
+		define(["./core", "./sha256", "./hmac"], factory);
 	}
 	else {
 		// Global (browser)
@@ -4063,191 +2703,10 @@ function objectToString(o) {
 	}
 }(this, function (CryptoJS) {
 
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var Base = C_lib.Base;
-	    var WordArray = C_lib.WordArray;
-	    var C_algo = C.algo;
-	    var MD5 = C_algo.MD5;
-
-	    /**
-	     * This key derivation function is meant to conform with EVP_BytesToKey.
-	     * www.openssl.org/docs/crypto/EVP_BytesToKey.html
-	     */
-	    var EvpKDF = C_algo.EvpKDF = Base.extend({
-	        /**
-	         * Configuration options.
-	         *
-	         * @property {number} keySize The key size in words to generate. Default: 4 (128 bits)
-	         * @property {Hasher} hasher The hash algorithm to use. Default: MD5
-	         * @property {number} iterations The number of iterations to perform. Default: 1
-	         */
-	        cfg: Base.extend({
-	            keySize: 128/32,
-	            hasher: MD5,
-	            iterations: 1
-	        }),
-
-	        /**
-	         * Initializes a newly created key derivation function.
-	         *
-	         * @param {Object} cfg (Optional) The configuration options to use for the derivation.
-	         *
-	         * @example
-	         *
-	         *     var kdf = CryptoJS.algo.EvpKDF.create();
-	         *     var kdf = CryptoJS.algo.EvpKDF.create({ keySize: 8 });
-	         *     var kdf = CryptoJS.algo.EvpKDF.create({ keySize: 8, iterations: 1000 });
-	         */
-	        init: function (cfg) {
-	            this.cfg = this.cfg.extend(cfg);
-	        },
-
-	        /**
-	         * Derives a key from a password.
-	         *
-	         * @param {WordArray|string} password The password.
-	         * @param {WordArray|string} salt A salt.
-	         *
-	         * @return {WordArray} The derived key.
-	         *
-	         * @example
-	         *
-	         *     var key = kdf.compute(password, salt);
-	         */
-	        compute: function (password, salt) {
-	            // Shortcut
-	            var cfg = this.cfg;
-
-	            // Init hasher
-	            var hasher = cfg.hasher.create();
-
-	            // Initial values
-	            var derivedKey = WordArray.create();
-
-	            // Shortcuts
-	            var derivedKeyWords = derivedKey.words;
-	            var keySize = cfg.keySize;
-	            var iterations = cfg.iterations;
-
-	            // Generate key
-	            while (derivedKeyWords.length < keySize) {
-	                if (block) {
-	                    hasher.update(block);
-	                }
-	                var block = hasher.update(password).finalize(salt);
-	                hasher.reset();
-
-	                // Iterations
-	                for (var i = 1; i < iterations; i++) {
-	                    block = hasher.finalize(block);
-	                    hasher.reset();
-	                }
-
-	                derivedKey.concat(block);
-	            }
-	            derivedKey.sigBytes = keySize * 4;
-
-	            return derivedKey;
-	        }
-	    });
-
-	    /**
-	     * Derives a key from a password.
-	     *
-	     * @param {WordArray|string} password The password.
-	     * @param {WordArray|string} salt A salt.
-	     * @param {Object} cfg (Optional) The configuration options to use for this computation.
-	     *
-	     * @return {WordArray} The derived key.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var key = CryptoJS.EvpKDF(password, salt);
-	     *     var key = CryptoJS.EvpKDF(password, salt, { keySize: 8 });
-	     *     var key = CryptoJS.EvpKDF(password, salt, { keySize: 8, iterations: 1000 });
-	     */
-	    C.EvpKDF = function (password, salt, cfg) {
-	        return EvpKDF.create(cfg).compute(password, salt);
-	    };
-	}());
-
-
-	return CryptoJS.EvpKDF;
+	return CryptoJS.HmacSHA256;
 
 }));
-},{"./core":9,"./hmac":14,"./sha1":33}],13:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function (undefined) {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var CipherParams = C_lib.CipherParams;
-	    var C_enc = C.enc;
-	    var Hex = C_enc.Hex;
-	    var C_format = C.format;
-
-	    var HexFormatter = C_format.Hex = {
-	        /**
-	         * Converts the ciphertext of a cipher params object to a hexadecimally encoded string.
-	         *
-	         * @param {CipherParams} cipherParams The cipher params object.
-	         *
-	         * @return {string} The hexadecimally encoded string.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var hexString = CryptoJS.format.Hex.stringify(cipherParams);
-	         */
-	        stringify: function (cipherParams) {
-	            return cipherParams.ciphertext.toString(Hex);
-	        },
-
-	        /**
-	         * Converts a hexadecimally encoded ciphertext string to a cipher params object.
-	         *
-	         * @param {string} input The hexadecimally encoded string.
-	         *
-	         * @return {CipherParams} The cipher params object.
-	         *
-	         * @static
-	         *
-	         * @example
-	         *
-	         *     var cipherParams = CryptoJS.format.Hex.parse(hexString);
-	         */
-	        parse: function (input) {
-	            var ciphertext = Hex.parse(input);
-	            return CipherParams.create({ ciphertext: ciphertext });
-	        }
-	    };
-	}());
-
-
-	return CryptoJS.format.Hex;
-
-}));
-},{"./cipher-core":8,"./core":9}],14:[function(require,module,exports){
+},{"./core":7,"./hmac":10,"./sha256":11}],10:[function(require,module,exports){
 ;(function (root, factory) {
 	if (typeof exports === "object") {
 		// CommonJS
@@ -4391,2106 +2850,7 @@ function objectToString(o) {
 
 
 }));
-},{"./core":9}],15:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./x64-core"), require("./lib-typedarrays"), require("./enc-utf16"), require("./enc-base64"), require("./md5"), require("./sha1"), require("./sha256"), require("./sha224"), require("./sha512"), require("./sha384"), require("./sha3"), require("./ripemd160"), require("./hmac"), require("./pbkdf2"), require("./evpkdf"), require("./cipher-core"), require("./mode-cfb"), require("./mode-ctr"), require("./mode-ctr-gladman"), require("./mode-ofb"), require("./mode-ecb"), require("./pad-ansix923"), require("./pad-iso10126"), require("./pad-iso97971"), require("./pad-zeropadding"), require("./pad-nopadding"), require("./format-hex"), require("./aes"), require("./tripledes"), require("./rc4"), require("./rabbit"), require("./rabbit-legacy"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./x64-core", "./lib-typedarrays", "./enc-utf16", "./enc-base64", "./md5", "./sha1", "./sha256", "./sha224", "./sha512", "./sha384", "./sha3", "./ripemd160", "./hmac", "./pbkdf2", "./evpkdf", "./cipher-core", "./mode-cfb", "./mode-ctr", "./mode-ctr-gladman", "./mode-ofb", "./mode-ecb", "./pad-ansix923", "./pad-iso10126", "./pad-iso97971", "./pad-zeropadding", "./pad-nopadding", "./format-hex", "./aes", "./tripledes", "./rc4", "./rabbit", "./rabbit-legacy"], factory);
-	}
-	else {
-		// Global (browser)
-		root.CryptoJS = factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	return CryptoJS;
-
-}));
-},{"./aes":7,"./cipher-core":8,"./core":9,"./enc-base64":10,"./enc-utf16":11,"./evpkdf":12,"./format-hex":13,"./hmac":14,"./lib-typedarrays":16,"./md5":17,"./mode-cfb":18,"./mode-ctr":20,"./mode-ctr-gladman":19,"./mode-ecb":21,"./mode-ofb":22,"./pad-ansix923":23,"./pad-iso10126":24,"./pad-iso97971":25,"./pad-nopadding":26,"./pad-zeropadding":27,"./pbkdf2":28,"./rabbit":30,"./rabbit-legacy":29,"./rc4":31,"./ripemd160":32,"./sha1":33,"./sha224":34,"./sha256":35,"./sha3":36,"./sha384":37,"./sha512":38,"./tripledes":39,"./x64-core":40}],16:[function(require,module,exports){
-;(function (root, factory) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Check if typed arrays are supported
-	    if (typeof ArrayBuffer != 'function') {
-	        return;
-	    }
-
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var WordArray = C_lib.WordArray;
-
-	    // Reference original init
-	    var superInit = WordArray.init;
-
-	    // Augment WordArray.init to handle typed arrays
-	    var subInit = WordArray.init = function (typedArray) {
-	        // Convert buffers to uint8
-	        if (typedArray instanceof ArrayBuffer) {
-	            typedArray = new Uint8Array(typedArray);
-	        }
-
-	        // Convert other array views to uint8
-	        if (
-	            typedArray instanceof Int8Array ||
-	            (typeof Uint8ClampedArray !== "undefined" && typedArray instanceof Uint8ClampedArray) ||
-	            typedArray instanceof Int16Array ||
-	            typedArray instanceof Uint16Array ||
-	            typedArray instanceof Int32Array ||
-	            typedArray instanceof Uint32Array ||
-	            typedArray instanceof Float32Array ||
-	            typedArray instanceof Float64Array
-	        ) {
-	            typedArray = new Uint8Array(typedArray.buffer, typedArray.byteOffset, typedArray.byteLength);
-	        }
-
-	        // Handle Uint8Array
-	        if (typedArray instanceof Uint8Array) {
-	            // Shortcut
-	            var typedArrayByteLength = typedArray.byteLength;
-
-	            // Extract bytes
-	            var words = [];
-	            for (var i = 0; i < typedArrayByteLength; i++) {
-	                words[i >>> 2] |= typedArray[i] << (24 - (i % 4) * 8);
-	            }
-
-	            // Initialize this word array
-	            superInit.call(this, words, typedArrayByteLength);
-	        } else {
-	            // Else call normal init
-	            superInit.apply(this, arguments);
-	        }
-	    };
-
-	    subInit.prototype = WordArray;
-	}());
-
-
-	return CryptoJS.lib.WordArray;
-
-}));
-},{"./core":9}],17:[function(require,module,exports){
-;(function (root, factory) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function (Math) {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var WordArray = C_lib.WordArray;
-	    var Hasher = C_lib.Hasher;
-	    var C_algo = C.algo;
-
-	    // Constants table
-	    var T = [];
-
-	    // Compute constants
-	    (function () {
-	        for (var i = 0; i < 64; i++) {
-	            T[i] = (Math.abs(Math.sin(i + 1)) * 0x100000000) | 0;
-	        }
-	    }());
-
-	    /**
-	     * MD5 hash algorithm.
-	     */
-	    var MD5 = C_algo.MD5 = Hasher.extend({
-	        _doReset: function () {
-	            this._hash = new WordArray.init([
-	                0x67452301, 0xefcdab89,
-	                0x98badcfe, 0x10325476
-	            ]);
-	        },
-
-	        _doProcessBlock: function (M, offset) {
-	            // Swap endian
-	            for (var i = 0; i < 16; i++) {
-	                // Shortcuts
-	                var offset_i = offset + i;
-	                var M_offset_i = M[offset_i];
-
-	                M[offset_i] = (
-	                    (((M_offset_i << 8)  | (M_offset_i >>> 24)) & 0x00ff00ff) |
-	                    (((M_offset_i << 24) | (M_offset_i >>> 8))  & 0xff00ff00)
-	                );
-	            }
-
-	            // Shortcuts
-	            var H = this._hash.words;
-
-	            var M_offset_0  = M[offset + 0];
-	            var M_offset_1  = M[offset + 1];
-	            var M_offset_2  = M[offset + 2];
-	            var M_offset_3  = M[offset + 3];
-	            var M_offset_4  = M[offset + 4];
-	            var M_offset_5  = M[offset + 5];
-	            var M_offset_6  = M[offset + 6];
-	            var M_offset_7  = M[offset + 7];
-	            var M_offset_8  = M[offset + 8];
-	            var M_offset_9  = M[offset + 9];
-	            var M_offset_10 = M[offset + 10];
-	            var M_offset_11 = M[offset + 11];
-	            var M_offset_12 = M[offset + 12];
-	            var M_offset_13 = M[offset + 13];
-	            var M_offset_14 = M[offset + 14];
-	            var M_offset_15 = M[offset + 15];
-
-	            // Working varialbes
-	            var a = H[0];
-	            var b = H[1];
-	            var c = H[2];
-	            var d = H[3];
-
-	            // Computation
-	            a = FF(a, b, c, d, M_offset_0,  7,  T[0]);
-	            d = FF(d, a, b, c, M_offset_1,  12, T[1]);
-	            c = FF(c, d, a, b, M_offset_2,  17, T[2]);
-	            b = FF(b, c, d, a, M_offset_3,  22, T[3]);
-	            a = FF(a, b, c, d, M_offset_4,  7,  T[4]);
-	            d = FF(d, a, b, c, M_offset_5,  12, T[5]);
-	            c = FF(c, d, a, b, M_offset_6,  17, T[6]);
-	            b = FF(b, c, d, a, M_offset_7,  22, T[7]);
-	            a = FF(a, b, c, d, M_offset_8,  7,  T[8]);
-	            d = FF(d, a, b, c, M_offset_9,  12, T[9]);
-	            c = FF(c, d, a, b, M_offset_10, 17, T[10]);
-	            b = FF(b, c, d, a, M_offset_11, 22, T[11]);
-	            a = FF(a, b, c, d, M_offset_12, 7,  T[12]);
-	            d = FF(d, a, b, c, M_offset_13, 12, T[13]);
-	            c = FF(c, d, a, b, M_offset_14, 17, T[14]);
-	            b = FF(b, c, d, a, M_offset_15, 22, T[15]);
-
-	            a = GG(a, b, c, d, M_offset_1,  5,  T[16]);
-	            d = GG(d, a, b, c, M_offset_6,  9,  T[17]);
-	            c = GG(c, d, a, b, M_offset_11, 14, T[18]);
-	            b = GG(b, c, d, a, M_offset_0,  20, T[19]);
-	            a = GG(a, b, c, d, M_offset_5,  5,  T[20]);
-	            d = GG(d, a, b, c, M_offset_10, 9,  T[21]);
-	            c = GG(c, d, a, b, M_offset_15, 14, T[22]);
-	            b = GG(b, c, d, a, M_offset_4,  20, T[23]);
-	            a = GG(a, b, c, d, M_offset_9,  5,  T[24]);
-	            d = GG(d, a, b, c, M_offset_14, 9,  T[25]);
-	            c = GG(c, d, a, b, M_offset_3,  14, T[26]);
-	            b = GG(b, c, d, a, M_offset_8,  20, T[27]);
-	            a = GG(a, b, c, d, M_offset_13, 5,  T[28]);
-	            d = GG(d, a, b, c, M_offset_2,  9,  T[29]);
-	            c = GG(c, d, a, b, M_offset_7,  14, T[30]);
-	            b = GG(b, c, d, a, M_offset_12, 20, T[31]);
-
-	            a = HH(a, b, c, d, M_offset_5,  4,  T[32]);
-	            d = HH(d, a, b, c, M_offset_8,  11, T[33]);
-	            c = HH(c, d, a, b, M_offset_11, 16, T[34]);
-	            b = HH(b, c, d, a, M_offset_14, 23, T[35]);
-	            a = HH(a, b, c, d, M_offset_1,  4,  T[36]);
-	            d = HH(d, a, b, c, M_offset_4,  11, T[37]);
-	            c = HH(c, d, a, b, M_offset_7,  16, T[38]);
-	            b = HH(b, c, d, a, M_offset_10, 23, T[39]);
-	            a = HH(a, b, c, d, M_offset_13, 4,  T[40]);
-	            d = HH(d, a, b, c, M_offset_0,  11, T[41]);
-	            c = HH(c, d, a, b, M_offset_3,  16, T[42]);
-	            b = HH(b, c, d, a, M_offset_6,  23, T[43]);
-	            a = HH(a, b, c, d, M_offset_9,  4,  T[44]);
-	            d = HH(d, a, b, c, M_offset_12, 11, T[45]);
-	            c = HH(c, d, a, b, M_offset_15, 16, T[46]);
-	            b = HH(b, c, d, a, M_offset_2,  23, T[47]);
-
-	            a = II(a, b, c, d, M_offset_0,  6,  T[48]);
-	            d = II(d, a, b, c, M_offset_7,  10, T[49]);
-	            c = II(c, d, a, b, M_offset_14, 15, T[50]);
-	            b = II(b, c, d, a, M_offset_5,  21, T[51]);
-	            a = II(a, b, c, d, M_offset_12, 6,  T[52]);
-	            d = II(d, a, b, c, M_offset_3,  10, T[53]);
-	            c = II(c, d, a, b, M_offset_10, 15, T[54]);
-	            b = II(b, c, d, a, M_offset_1,  21, T[55]);
-	            a = II(a, b, c, d, M_offset_8,  6,  T[56]);
-	            d = II(d, a, b, c, M_offset_15, 10, T[57]);
-	            c = II(c, d, a, b, M_offset_6,  15, T[58]);
-	            b = II(b, c, d, a, M_offset_13, 21, T[59]);
-	            a = II(a, b, c, d, M_offset_4,  6,  T[60]);
-	            d = II(d, a, b, c, M_offset_11, 10, T[61]);
-	            c = II(c, d, a, b, M_offset_2,  15, T[62]);
-	            b = II(b, c, d, a, M_offset_9,  21, T[63]);
-
-	            // Intermediate hash value
-	            H[0] = (H[0] + a) | 0;
-	            H[1] = (H[1] + b) | 0;
-	            H[2] = (H[2] + c) | 0;
-	            H[3] = (H[3] + d) | 0;
-	        },
-
-	        _doFinalize: function () {
-	            // Shortcuts
-	            var data = this._data;
-	            var dataWords = data.words;
-
-	            var nBitsTotal = this._nDataBytes * 8;
-	            var nBitsLeft = data.sigBytes * 8;
-
-	            // Add padding
-	            dataWords[nBitsLeft >>> 5] |= 0x80 << (24 - nBitsLeft % 32);
-
-	            var nBitsTotalH = Math.floor(nBitsTotal / 0x100000000);
-	            var nBitsTotalL = nBitsTotal;
-	            dataWords[(((nBitsLeft + 64) >>> 9) << 4) + 15] = (
-	                (((nBitsTotalH << 8)  | (nBitsTotalH >>> 24)) & 0x00ff00ff) |
-	                (((nBitsTotalH << 24) | (nBitsTotalH >>> 8))  & 0xff00ff00)
-	            );
-	            dataWords[(((nBitsLeft + 64) >>> 9) << 4) + 14] = (
-	                (((nBitsTotalL << 8)  | (nBitsTotalL >>> 24)) & 0x00ff00ff) |
-	                (((nBitsTotalL << 24) | (nBitsTotalL >>> 8))  & 0xff00ff00)
-	            );
-
-	            data.sigBytes = (dataWords.length + 1) * 4;
-
-	            // Hash final blocks
-	            this._process();
-
-	            // Shortcuts
-	            var hash = this._hash;
-	            var H = hash.words;
-
-	            // Swap endian
-	            for (var i = 0; i < 4; i++) {
-	                // Shortcut
-	                var H_i = H[i];
-
-	                H[i] = (((H_i << 8)  | (H_i >>> 24)) & 0x00ff00ff) |
-	                       (((H_i << 24) | (H_i >>> 8))  & 0xff00ff00);
-	            }
-
-	            // Return final computed hash
-	            return hash;
-	        },
-
-	        clone: function () {
-	            var clone = Hasher.clone.call(this);
-	            clone._hash = this._hash.clone();
-
-	            return clone;
-	        }
-	    });
-
-	    function FF(a, b, c, d, x, s, t) {
-	        var n = a + ((b & c) | (~b & d)) + x + t;
-	        return ((n << s) | (n >>> (32 - s))) + b;
-	    }
-
-	    function GG(a, b, c, d, x, s, t) {
-	        var n = a + ((b & d) | (c & ~d)) + x + t;
-	        return ((n << s) | (n >>> (32 - s))) + b;
-	    }
-
-	    function HH(a, b, c, d, x, s, t) {
-	        var n = a + (b ^ c ^ d) + x + t;
-	        return ((n << s) | (n >>> (32 - s))) + b;
-	    }
-
-	    function II(a, b, c, d, x, s, t) {
-	        var n = a + (c ^ (b | ~d)) + x + t;
-	        return ((n << s) | (n >>> (32 - s))) + b;
-	    }
-
-	    /**
-	     * Shortcut function to the hasher's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     *
-	     * @return {WordArray} The hash.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hash = CryptoJS.MD5('message');
-	     *     var hash = CryptoJS.MD5(wordArray);
-	     */
-	    C.MD5 = Hasher._createHelper(MD5);
-
-	    /**
-	     * Shortcut function to the HMAC's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     * @param {WordArray|string} key The secret key.
-	     *
-	     * @return {WordArray} The HMAC.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hmac = CryptoJS.HmacMD5(message, key);
-	     */
-	    C.HmacMD5 = Hasher._createHmacHelper(MD5);
-	}(Math));
-
-
-	return CryptoJS.MD5;
-
-}));
-},{"./core":9}],18:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * Cipher Feedback block mode.
-	 */
-	CryptoJS.mode.CFB = (function () {
-	    var CFB = CryptoJS.lib.BlockCipherMode.extend();
-
-	    CFB.Encryptor = CFB.extend({
-	        processBlock: function (words, offset) {
-	            // Shortcuts
-	            var cipher = this._cipher;
-	            var blockSize = cipher.blockSize;
-
-	            generateKeystreamAndEncrypt.call(this, words, offset, blockSize, cipher);
-
-	            // Remember this block to use with next block
-	            this._prevBlock = words.slice(offset, offset + blockSize);
-	        }
-	    });
-
-	    CFB.Decryptor = CFB.extend({
-	        processBlock: function (words, offset) {
-	            // Shortcuts
-	            var cipher = this._cipher;
-	            var blockSize = cipher.blockSize;
-
-	            // Remember this block to use with next block
-	            var thisBlock = words.slice(offset, offset + blockSize);
-
-	            generateKeystreamAndEncrypt.call(this, words, offset, blockSize, cipher);
-
-	            // This block becomes the previous block
-	            this._prevBlock = thisBlock;
-	        }
-	    });
-
-	    function generateKeystreamAndEncrypt(words, offset, blockSize, cipher) {
-	        // Shortcut
-	        var iv = this._iv;
-
-	        // Generate keystream
-	        if (iv) {
-	            var keystream = iv.slice(0);
-
-	            // Remove IV for subsequent blocks
-	            this._iv = undefined;
-	        } else {
-	            var keystream = this._prevBlock;
-	        }
-	        cipher.encryptBlock(keystream, 0);
-
-	        // Encrypt
-	        for (var i = 0; i < blockSize; i++) {
-	            words[offset + i] ^= keystream[i];
-	        }
-	    }
-
-	    return CFB;
-	}());
-
-
-	return CryptoJS.mode.CFB;
-
-}));
-},{"./cipher-core":8,"./core":9}],19:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/** @preserve
-	 * Counter block mode compatible with  Dr Brian Gladman fileenc.c
-	 * derived from CryptoJS.mode.CTR
-	 * Jan Hruby jhruby.web@gmail.com
-	 */
-	CryptoJS.mode.CTRGladman = (function () {
-	    var CTRGladman = CryptoJS.lib.BlockCipherMode.extend();
-
-		function incWord(word)
-		{
-			if (((word >> 24) & 0xff) === 0xff) { //overflow
-			var b1 = (word >> 16)&0xff;
-			var b2 = (word >> 8)&0xff;
-			var b3 = word & 0xff;
-
-			if (b1 === 0xff) // overflow b1
-			{
-			b1 = 0;
-			if (b2 === 0xff)
-			{
-				b2 = 0;
-				if (b3 === 0xff)
-				{
-					b3 = 0;
-				}
-				else
-				{
-					++b3;
-				}
-			}
-			else
-			{
-				++b2;
-			}
-			}
-			else
-			{
-			++b1;
-			}
-
-			word = 0;
-			word += (b1 << 16);
-			word += (b2 << 8);
-			word += b3;
-			}
-			else
-			{
-			word += (0x01 << 24);
-			}
-			return word;
-		}
-
-		function incCounter(counter)
-		{
-			if ((counter[0] = incWord(counter[0])) === 0)
-			{
-				// encr_data in fileenc.c from  Dr Brian Gladman's counts only with DWORD j < 8
-				counter[1] = incWord(counter[1]);
-			}
-			return counter;
-		}
-
-	    var Encryptor = CTRGladman.Encryptor = CTRGladman.extend({
-	        processBlock: function (words, offset) {
-	            // Shortcuts
-	            var cipher = this._cipher
-	            var blockSize = cipher.blockSize;
-	            var iv = this._iv;
-	            var counter = this._counter;
-
-	            // Generate keystream
-	            if (iv) {
-	                counter = this._counter = iv.slice(0);
-
-	                // Remove IV for subsequent blocks
-	                this._iv = undefined;
-	            }
-
-				incCounter(counter);
-
-				var keystream = counter.slice(0);
-	            cipher.encryptBlock(keystream, 0);
-
-	            // Encrypt
-	            for (var i = 0; i < blockSize; i++) {
-	                words[offset + i] ^= keystream[i];
-	            }
-	        }
-	    });
-
-	    CTRGladman.Decryptor = Encryptor;
-
-	    return CTRGladman;
-	}());
-
-
-
-
-	return CryptoJS.mode.CTRGladman;
-
-}));
-},{"./cipher-core":8,"./core":9}],20:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * Counter block mode.
-	 */
-	CryptoJS.mode.CTR = (function () {
-	    var CTR = CryptoJS.lib.BlockCipherMode.extend();
-
-	    var Encryptor = CTR.Encryptor = CTR.extend({
-	        processBlock: function (words, offset) {
-	            // Shortcuts
-	            var cipher = this._cipher
-	            var blockSize = cipher.blockSize;
-	            var iv = this._iv;
-	            var counter = this._counter;
-
-	            // Generate keystream
-	            if (iv) {
-	                counter = this._counter = iv.slice(0);
-
-	                // Remove IV for subsequent blocks
-	                this._iv = undefined;
-	            }
-	            var keystream = counter.slice(0);
-	            cipher.encryptBlock(keystream, 0);
-
-	            // Increment counter
-	            counter[blockSize - 1] = (counter[blockSize - 1] + 1) | 0
-
-	            // Encrypt
-	            for (var i = 0; i < blockSize; i++) {
-	                words[offset + i] ^= keystream[i];
-	            }
-	        }
-	    });
-
-	    CTR.Decryptor = Encryptor;
-
-	    return CTR;
-	}());
-
-
-	return CryptoJS.mode.CTR;
-
-}));
-},{"./cipher-core":8,"./core":9}],21:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * Electronic Codebook block mode.
-	 */
-	CryptoJS.mode.ECB = (function () {
-	    var ECB = CryptoJS.lib.BlockCipherMode.extend();
-
-	    ECB.Encryptor = ECB.extend({
-	        processBlock: function (words, offset) {
-	            this._cipher.encryptBlock(words, offset);
-	        }
-	    });
-
-	    ECB.Decryptor = ECB.extend({
-	        processBlock: function (words, offset) {
-	            this._cipher.decryptBlock(words, offset);
-	        }
-	    });
-
-	    return ECB;
-	}());
-
-
-	return CryptoJS.mode.ECB;
-
-}));
-},{"./cipher-core":8,"./core":9}],22:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * Output Feedback block mode.
-	 */
-	CryptoJS.mode.OFB = (function () {
-	    var OFB = CryptoJS.lib.BlockCipherMode.extend();
-
-	    var Encryptor = OFB.Encryptor = OFB.extend({
-	        processBlock: function (words, offset) {
-	            // Shortcuts
-	            var cipher = this._cipher
-	            var blockSize = cipher.blockSize;
-	            var iv = this._iv;
-	            var keystream = this._keystream;
-
-	            // Generate keystream
-	            if (iv) {
-	                keystream = this._keystream = iv.slice(0);
-
-	                // Remove IV for subsequent blocks
-	                this._iv = undefined;
-	            }
-	            cipher.encryptBlock(keystream, 0);
-
-	            // Encrypt
-	            for (var i = 0; i < blockSize; i++) {
-	                words[offset + i] ^= keystream[i];
-	            }
-	        }
-	    });
-
-	    OFB.Decryptor = Encryptor;
-
-	    return OFB;
-	}());
-
-
-	return CryptoJS.mode.OFB;
-
-}));
-},{"./cipher-core":8,"./core":9}],23:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * ANSI X.923 padding strategy.
-	 */
-	CryptoJS.pad.AnsiX923 = {
-	    pad: function (data, blockSize) {
-	        // Shortcuts
-	        var dataSigBytes = data.sigBytes;
-	        var blockSizeBytes = blockSize * 4;
-
-	        // Count padding bytes
-	        var nPaddingBytes = blockSizeBytes - dataSigBytes % blockSizeBytes;
-
-	        // Compute last byte position
-	        var lastBytePos = dataSigBytes + nPaddingBytes - 1;
-
-	        // Pad
-	        data.clamp();
-	        data.words[lastBytePos >>> 2] |= nPaddingBytes << (24 - (lastBytePos % 4) * 8);
-	        data.sigBytes += nPaddingBytes;
-	    },
-
-	    unpad: function (data) {
-	        // Get number of padding bytes from last byte
-	        var nPaddingBytes = data.words[(data.sigBytes - 1) >>> 2] & 0xff;
-
-	        // Remove padding
-	        data.sigBytes -= nPaddingBytes;
-	    }
-	};
-
-
-	return CryptoJS.pad.Ansix923;
-
-}));
-},{"./cipher-core":8,"./core":9}],24:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * ISO 10126 padding strategy.
-	 */
-	CryptoJS.pad.Iso10126 = {
-	    pad: function (data, blockSize) {
-	        // Shortcut
-	        var blockSizeBytes = blockSize * 4;
-
-	        // Count padding bytes
-	        var nPaddingBytes = blockSizeBytes - data.sigBytes % blockSizeBytes;
-
-	        // Pad
-	        data.concat(CryptoJS.lib.WordArray.random(nPaddingBytes - 1)).
-	             concat(CryptoJS.lib.WordArray.create([nPaddingBytes << 24], 1));
-	    },
-
-	    unpad: function (data) {
-	        // Get number of padding bytes from last byte
-	        var nPaddingBytes = data.words[(data.sigBytes - 1) >>> 2] & 0xff;
-
-	        // Remove padding
-	        data.sigBytes -= nPaddingBytes;
-	    }
-	};
-
-
-	return CryptoJS.pad.Iso10126;
-
-}));
-},{"./cipher-core":8,"./core":9}],25:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * ISO/IEC 9797-1 Padding Method 2.
-	 */
-	CryptoJS.pad.Iso97971 = {
-	    pad: function (data, blockSize) {
-	        // Add 0x80 byte
-	        data.concat(CryptoJS.lib.WordArray.create([0x80000000], 1));
-
-	        // Zero pad the rest
-	        CryptoJS.pad.ZeroPadding.pad(data, blockSize);
-	    },
-
-	    unpad: function (data) {
-	        // Remove zero padding
-	        CryptoJS.pad.ZeroPadding.unpad(data);
-
-	        // Remove one more byte -- the 0x80 byte
-	        data.sigBytes--;
-	    }
-	};
-
-
-	return CryptoJS.pad.Iso97971;
-
-}));
-},{"./cipher-core":8,"./core":9}],26:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * A noop padding strategy.
-	 */
-	CryptoJS.pad.NoPadding = {
-	    pad: function () {
-	    },
-
-	    unpad: function () {
-	    }
-	};
-
-
-	return CryptoJS.pad.NoPadding;
-
-}));
-},{"./cipher-core":8,"./core":9}],27:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/**
-	 * Zero padding strategy.
-	 */
-	CryptoJS.pad.ZeroPadding = {
-	    pad: function (data, blockSize) {
-	        // Shortcut
-	        var blockSizeBytes = blockSize * 4;
-
-	        // Pad
-	        data.clamp();
-	        data.sigBytes += blockSizeBytes - ((data.sigBytes % blockSizeBytes) || blockSizeBytes);
-	    },
-
-	    unpad: function (data) {
-	        // Shortcut
-	        var dataWords = data.words;
-
-	        // Unpad
-	        var i = data.sigBytes - 1;
-	        while (!((dataWords[i >>> 2] >>> (24 - (i % 4) * 8)) & 0xff)) {
-	            i--;
-	        }
-	        data.sigBytes = i + 1;
-	    }
-	};
-
-
-	return CryptoJS.pad.ZeroPadding;
-
-}));
-},{"./cipher-core":8,"./core":9}],28:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./sha1"), require("./hmac"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./sha1", "./hmac"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var Base = C_lib.Base;
-	    var WordArray = C_lib.WordArray;
-	    var C_algo = C.algo;
-	    var SHA1 = C_algo.SHA1;
-	    var HMAC = C_algo.HMAC;
-
-	    /**
-	     * Password-Based Key Derivation Function 2 algorithm.
-	     */
-	    var PBKDF2 = C_algo.PBKDF2 = Base.extend({
-	        /**
-	         * Configuration options.
-	         *
-	         * @property {number} keySize The key size in words to generate. Default: 4 (128 bits)
-	         * @property {Hasher} hasher The hasher to use. Default: SHA1
-	         * @property {number} iterations The number of iterations to perform. Default: 1
-	         */
-	        cfg: Base.extend({
-	            keySize: 128/32,
-	            hasher: SHA1,
-	            iterations: 1
-	        }),
-
-	        /**
-	         * Initializes a newly created key derivation function.
-	         *
-	         * @param {Object} cfg (Optional) The configuration options to use for the derivation.
-	         *
-	         * @example
-	         *
-	         *     var kdf = CryptoJS.algo.PBKDF2.create();
-	         *     var kdf = CryptoJS.algo.PBKDF2.create({ keySize: 8 });
-	         *     var kdf = CryptoJS.algo.PBKDF2.create({ keySize: 8, iterations: 1000 });
-	         */
-	        init: function (cfg) {
-	            this.cfg = this.cfg.extend(cfg);
-	        },
-
-	        /**
-	         * Computes the Password-Based Key Derivation Function 2.
-	         *
-	         * @param {WordArray|string} password The password.
-	         * @param {WordArray|string} salt A salt.
-	         *
-	         * @return {WordArray} The derived key.
-	         *
-	         * @example
-	         *
-	         *     var key = kdf.compute(password, salt);
-	         */
-	        compute: function (password, salt) {
-	            // Shortcut
-	            var cfg = this.cfg;
-
-	            // Init HMAC
-	            var hmac = HMAC.create(cfg.hasher, password);
-
-	            // Initial values
-	            var derivedKey = WordArray.create();
-	            var blockIndex = WordArray.create([0x00000001]);
-
-	            // Shortcuts
-	            var derivedKeyWords = derivedKey.words;
-	            var blockIndexWords = blockIndex.words;
-	            var keySize = cfg.keySize;
-	            var iterations = cfg.iterations;
-
-	            // Generate key
-	            while (derivedKeyWords.length < keySize) {
-	                var block = hmac.update(salt).finalize(blockIndex);
-	                hmac.reset();
-
-	                // Shortcuts
-	                var blockWords = block.words;
-	                var blockWordsLength = blockWords.length;
-
-	                // Iterations
-	                var intermediate = block;
-	                for (var i = 1; i < iterations; i++) {
-	                    intermediate = hmac.finalize(intermediate);
-	                    hmac.reset();
-
-	                    // Shortcut
-	                    var intermediateWords = intermediate.words;
-
-	                    // XOR intermediate with block
-	                    for (var j = 0; j < blockWordsLength; j++) {
-	                        blockWords[j] ^= intermediateWords[j];
-	                    }
-	                }
-
-	                derivedKey.concat(block);
-	                blockIndexWords[0]++;
-	            }
-	            derivedKey.sigBytes = keySize * 4;
-
-	            return derivedKey;
-	        }
-	    });
-
-	    /**
-	     * Computes the Password-Based Key Derivation Function 2.
-	     *
-	     * @param {WordArray|string} password The password.
-	     * @param {WordArray|string} salt A salt.
-	     * @param {Object} cfg (Optional) The configuration options to use for this computation.
-	     *
-	     * @return {WordArray} The derived key.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var key = CryptoJS.PBKDF2(password, salt);
-	     *     var key = CryptoJS.PBKDF2(password, salt, { keySize: 8 });
-	     *     var key = CryptoJS.PBKDF2(password, salt, { keySize: 8, iterations: 1000 });
-	     */
-	    C.PBKDF2 = function (password, salt, cfg) {
-	        return PBKDF2.create(cfg).compute(password, salt);
-	    };
-	}());
-
-
-	return CryptoJS.PBKDF2;
-
-}));
-},{"./core":9,"./hmac":14,"./sha1":33}],29:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./enc-base64"), require("./md5"), require("./evpkdf"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./enc-base64", "./md5", "./evpkdf", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var StreamCipher = C_lib.StreamCipher;
-	    var C_algo = C.algo;
-
-	    // Reusable objects
-	    var S  = [];
-	    var C_ = [];
-	    var G  = [];
-
-	    /**
-	     * Rabbit stream cipher algorithm.
-	     *
-	     * This is a legacy version that neglected to convert the key to little-endian.
-	     * This error doesn't affect the cipher's security,
-	     * but it does affect its compatibility with other implementations.
-	     */
-	    var RabbitLegacy = C_algo.RabbitLegacy = StreamCipher.extend({
-	        _doReset: function () {
-	            // Shortcuts
-	            var K = this._key.words;
-	            var iv = this.cfg.iv;
-
-	            // Generate initial state values
-	            var X = this._X = [
-	                K[0], (K[3] << 16) | (K[2] >>> 16),
-	                K[1], (K[0] << 16) | (K[3] >>> 16),
-	                K[2], (K[1] << 16) | (K[0] >>> 16),
-	                K[3], (K[2] << 16) | (K[1] >>> 16)
-	            ];
-
-	            // Generate initial counter values
-	            var C = this._C = [
-	                (K[2] << 16) | (K[2] >>> 16), (K[0] & 0xffff0000) | (K[1] & 0x0000ffff),
-	                (K[3] << 16) | (K[3] >>> 16), (K[1] & 0xffff0000) | (K[2] & 0x0000ffff),
-	                (K[0] << 16) | (K[0] >>> 16), (K[2] & 0xffff0000) | (K[3] & 0x0000ffff),
-	                (K[1] << 16) | (K[1] >>> 16), (K[3] & 0xffff0000) | (K[0] & 0x0000ffff)
-	            ];
-
-	            // Carry bit
-	            this._b = 0;
-
-	            // Iterate the system four times
-	            for (var i = 0; i < 4; i++) {
-	                nextState.call(this);
-	            }
-
-	            // Modify the counters
-	            for (var i = 0; i < 8; i++) {
-	                C[i] ^= X[(i + 4) & 7];
-	            }
-
-	            // IV setup
-	            if (iv) {
-	                // Shortcuts
-	                var IV = iv.words;
-	                var IV_0 = IV[0];
-	                var IV_1 = IV[1];
-
-	                // Generate four subvectors
-	                var i0 = (((IV_0 << 8) | (IV_0 >>> 24)) & 0x00ff00ff) | (((IV_0 << 24) | (IV_0 >>> 8)) & 0xff00ff00);
-	                var i2 = (((IV_1 << 8) | (IV_1 >>> 24)) & 0x00ff00ff) | (((IV_1 << 24) | (IV_1 >>> 8)) & 0xff00ff00);
-	                var i1 = (i0 >>> 16) | (i2 & 0xffff0000);
-	                var i3 = (i2 << 16)  | (i0 & 0x0000ffff);
-
-	                // Modify counter values
-	                C[0] ^= i0;
-	                C[1] ^= i1;
-	                C[2] ^= i2;
-	                C[3] ^= i3;
-	                C[4] ^= i0;
-	                C[5] ^= i1;
-	                C[6] ^= i2;
-	                C[7] ^= i3;
-
-	                // Iterate the system four times
-	                for (var i = 0; i < 4; i++) {
-	                    nextState.call(this);
-	                }
-	            }
-	        },
-
-	        _doProcessBlock: function (M, offset) {
-	            // Shortcut
-	            var X = this._X;
-
-	            // Iterate the system
-	            nextState.call(this);
-
-	            // Generate four keystream words
-	            S[0] = X[0] ^ (X[5] >>> 16) ^ (X[3] << 16);
-	            S[1] = X[2] ^ (X[7] >>> 16) ^ (X[5] << 16);
-	            S[2] = X[4] ^ (X[1] >>> 16) ^ (X[7] << 16);
-	            S[3] = X[6] ^ (X[3] >>> 16) ^ (X[1] << 16);
-
-	            for (var i = 0; i < 4; i++) {
-	                // Swap endian
-	                S[i] = (((S[i] << 8)  | (S[i] >>> 24)) & 0x00ff00ff) |
-	                       (((S[i] << 24) | (S[i] >>> 8))  & 0xff00ff00);
-
-	                // Encrypt
-	                M[offset + i] ^= S[i];
-	            }
-	        },
-
-	        blockSize: 128/32,
-
-	        ivSize: 64/32
-	    });
-
-	    function nextState() {
-	        // Shortcuts
-	        var X = this._X;
-	        var C = this._C;
-
-	        // Save old counter values
-	        for (var i = 0; i < 8; i++) {
-	            C_[i] = C[i];
-	        }
-
-	        // Calculate new counter values
-	        C[0] = (C[0] + 0x4d34d34d + this._b) | 0;
-	        C[1] = (C[1] + 0xd34d34d3 + ((C[0] >>> 0) < (C_[0] >>> 0) ? 1 : 0)) | 0;
-	        C[2] = (C[2] + 0x34d34d34 + ((C[1] >>> 0) < (C_[1] >>> 0) ? 1 : 0)) | 0;
-	        C[3] = (C[3] + 0x4d34d34d + ((C[2] >>> 0) < (C_[2] >>> 0) ? 1 : 0)) | 0;
-	        C[4] = (C[4] + 0xd34d34d3 + ((C[3] >>> 0) < (C_[3] >>> 0) ? 1 : 0)) | 0;
-	        C[5] = (C[5] + 0x34d34d34 + ((C[4] >>> 0) < (C_[4] >>> 0) ? 1 : 0)) | 0;
-	        C[6] = (C[6] + 0x4d34d34d + ((C[5] >>> 0) < (C_[5] >>> 0) ? 1 : 0)) | 0;
-	        C[7] = (C[7] + 0xd34d34d3 + ((C[6] >>> 0) < (C_[6] >>> 0) ? 1 : 0)) | 0;
-	        this._b = (C[7] >>> 0) < (C_[7] >>> 0) ? 1 : 0;
-
-	        // Calculate the g-values
-	        for (var i = 0; i < 8; i++) {
-	            var gx = X[i] + C[i];
-
-	            // Construct high and low argument for squaring
-	            var ga = gx & 0xffff;
-	            var gb = gx >>> 16;
-
-	            // Calculate high and low result of squaring
-	            var gh = ((((ga * ga) >>> 17) + ga * gb) >>> 15) + gb * gb;
-	            var gl = (((gx & 0xffff0000) * gx) | 0) + (((gx & 0x0000ffff) * gx) | 0);
-
-	            // High XOR low
-	            G[i] = gh ^ gl;
-	        }
-
-	        // Calculate new state values
-	        X[0] = (G[0] + ((G[7] << 16) | (G[7] >>> 16)) + ((G[6] << 16) | (G[6] >>> 16))) | 0;
-	        X[1] = (G[1] + ((G[0] << 8)  | (G[0] >>> 24)) + G[7]) | 0;
-	        X[2] = (G[2] + ((G[1] << 16) | (G[1] >>> 16)) + ((G[0] << 16) | (G[0] >>> 16))) | 0;
-	        X[3] = (G[3] + ((G[2] << 8)  | (G[2] >>> 24)) + G[1]) | 0;
-	        X[4] = (G[4] + ((G[3] << 16) | (G[3] >>> 16)) + ((G[2] << 16) | (G[2] >>> 16))) | 0;
-	        X[5] = (G[5] + ((G[4] << 8)  | (G[4] >>> 24)) + G[3]) | 0;
-	        X[6] = (G[6] + ((G[5] << 16) | (G[5] >>> 16)) + ((G[4] << 16) | (G[4] >>> 16))) | 0;
-	        X[7] = (G[7] + ((G[6] << 8)  | (G[6] >>> 24)) + G[5]) | 0;
-	    }
-
-	    /**
-	     * Shortcut functions to the cipher's object interface.
-	     *
-	     * @example
-	     *
-	     *     var ciphertext = CryptoJS.RabbitLegacy.encrypt(message, key, cfg);
-	     *     var plaintext  = CryptoJS.RabbitLegacy.decrypt(ciphertext, key, cfg);
-	     */
-	    C.RabbitLegacy = StreamCipher._createHelper(RabbitLegacy);
-	}());
-
-
-	return CryptoJS.RabbitLegacy;
-
-}));
-},{"./cipher-core":8,"./core":9,"./enc-base64":10,"./evpkdf":12,"./md5":17}],30:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./enc-base64"), require("./md5"), require("./evpkdf"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./enc-base64", "./md5", "./evpkdf", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var StreamCipher = C_lib.StreamCipher;
-	    var C_algo = C.algo;
-
-	    // Reusable objects
-	    var S  = [];
-	    var C_ = [];
-	    var G  = [];
-
-	    /**
-	     * Rabbit stream cipher algorithm
-	     */
-	    var Rabbit = C_algo.Rabbit = StreamCipher.extend({
-	        _doReset: function () {
-	            // Shortcuts
-	            var K = this._key.words;
-	            var iv = this.cfg.iv;
-
-	            // Swap endian
-	            for (var i = 0; i < 4; i++) {
-	                K[i] = (((K[i] << 8)  | (K[i] >>> 24)) & 0x00ff00ff) |
-	                       (((K[i] << 24) | (K[i] >>> 8))  & 0xff00ff00);
-	            }
-
-	            // Generate initial state values
-	            var X = this._X = [
-	                K[0], (K[3] << 16) | (K[2] >>> 16),
-	                K[1], (K[0] << 16) | (K[3] >>> 16),
-	                K[2], (K[1] << 16) | (K[0] >>> 16),
-	                K[3], (K[2] << 16) | (K[1] >>> 16)
-	            ];
-
-	            // Generate initial counter values
-	            var C = this._C = [
-	                (K[2] << 16) | (K[2] >>> 16), (K[0] & 0xffff0000) | (K[1] & 0x0000ffff),
-	                (K[3] << 16) | (K[3] >>> 16), (K[1] & 0xffff0000) | (K[2] & 0x0000ffff),
-	                (K[0] << 16) | (K[0] >>> 16), (K[2] & 0xffff0000) | (K[3] & 0x0000ffff),
-	                (K[1] << 16) | (K[1] >>> 16), (K[3] & 0xffff0000) | (K[0] & 0x0000ffff)
-	            ];
-
-	            // Carry bit
-	            this._b = 0;
-
-	            // Iterate the system four times
-	            for (var i = 0; i < 4; i++) {
-	                nextState.call(this);
-	            }
-
-	            // Modify the counters
-	            for (var i = 0; i < 8; i++) {
-	                C[i] ^= X[(i + 4) & 7];
-	            }
-
-	            // IV setup
-	            if (iv) {
-	                // Shortcuts
-	                var IV = iv.words;
-	                var IV_0 = IV[0];
-	                var IV_1 = IV[1];
-
-	                // Generate four subvectors
-	                var i0 = (((IV_0 << 8) | (IV_0 >>> 24)) & 0x00ff00ff) | (((IV_0 << 24) | (IV_0 >>> 8)) & 0xff00ff00);
-	                var i2 = (((IV_1 << 8) | (IV_1 >>> 24)) & 0x00ff00ff) | (((IV_1 << 24) | (IV_1 >>> 8)) & 0xff00ff00);
-	                var i1 = (i0 >>> 16) | (i2 & 0xffff0000);
-	                var i3 = (i2 << 16)  | (i0 & 0x0000ffff);
-
-	                // Modify counter values
-	                C[0] ^= i0;
-	                C[1] ^= i1;
-	                C[2] ^= i2;
-	                C[3] ^= i3;
-	                C[4] ^= i0;
-	                C[5] ^= i1;
-	                C[6] ^= i2;
-	                C[7] ^= i3;
-
-	                // Iterate the system four times
-	                for (var i = 0; i < 4; i++) {
-	                    nextState.call(this);
-	                }
-	            }
-	        },
-
-	        _doProcessBlock: function (M, offset) {
-	            // Shortcut
-	            var X = this._X;
-
-	            // Iterate the system
-	            nextState.call(this);
-
-	            // Generate four keystream words
-	            S[0] = X[0] ^ (X[5] >>> 16) ^ (X[3] << 16);
-	            S[1] = X[2] ^ (X[7] >>> 16) ^ (X[5] << 16);
-	            S[2] = X[4] ^ (X[1] >>> 16) ^ (X[7] << 16);
-	            S[3] = X[6] ^ (X[3] >>> 16) ^ (X[1] << 16);
-
-	            for (var i = 0; i < 4; i++) {
-	                // Swap endian
-	                S[i] = (((S[i] << 8)  | (S[i] >>> 24)) & 0x00ff00ff) |
-	                       (((S[i] << 24) | (S[i] >>> 8))  & 0xff00ff00);
-
-	                // Encrypt
-	                M[offset + i] ^= S[i];
-	            }
-	        },
-
-	        blockSize: 128/32,
-
-	        ivSize: 64/32
-	    });
-
-	    function nextState() {
-	        // Shortcuts
-	        var X = this._X;
-	        var C = this._C;
-
-	        // Save old counter values
-	        for (var i = 0; i < 8; i++) {
-	            C_[i] = C[i];
-	        }
-
-	        // Calculate new counter values
-	        C[0] = (C[0] + 0x4d34d34d + this._b) | 0;
-	        C[1] = (C[1] + 0xd34d34d3 + ((C[0] >>> 0) < (C_[0] >>> 0) ? 1 : 0)) | 0;
-	        C[2] = (C[2] + 0x34d34d34 + ((C[1] >>> 0) < (C_[1] >>> 0) ? 1 : 0)) | 0;
-	        C[3] = (C[3] + 0x4d34d34d + ((C[2] >>> 0) < (C_[2] >>> 0) ? 1 : 0)) | 0;
-	        C[4] = (C[4] + 0xd34d34d3 + ((C[3] >>> 0) < (C_[3] >>> 0) ? 1 : 0)) | 0;
-	        C[5] = (C[5] + 0x34d34d34 + ((C[4] >>> 0) < (C_[4] >>> 0) ? 1 : 0)) | 0;
-	        C[6] = (C[6] + 0x4d34d34d + ((C[5] >>> 0) < (C_[5] >>> 0) ? 1 : 0)) | 0;
-	        C[7] = (C[7] + 0xd34d34d3 + ((C[6] >>> 0) < (C_[6] >>> 0) ? 1 : 0)) | 0;
-	        this._b = (C[7] >>> 0) < (C_[7] >>> 0) ? 1 : 0;
-
-	        // Calculate the g-values
-	        for (var i = 0; i < 8; i++) {
-	            var gx = X[i] + C[i];
-
-	            // Construct high and low argument for squaring
-	            var ga = gx & 0xffff;
-	            var gb = gx >>> 16;
-
-	            // Calculate high and low result of squaring
-	            var gh = ((((ga * ga) >>> 17) + ga * gb) >>> 15) + gb * gb;
-	            var gl = (((gx & 0xffff0000) * gx) | 0) + (((gx & 0x0000ffff) * gx) | 0);
-
-	            // High XOR low
-	            G[i] = gh ^ gl;
-	        }
-
-	        // Calculate new state values
-	        X[0] = (G[0] + ((G[7] << 16) | (G[7] >>> 16)) + ((G[6] << 16) | (G[6] >>> 16))) | 0;
-	        X[1] = (G[1] + ((G[0] << 8)  | (G[0] >>> 24)) + G[7]) | 0;
-	        X[2] = (G[2] + ((G[1] << 16) | (G[1] >>> 16)) + ((G[0] << 16) | (G[0] >>> 16))) | 0;
-	        X[3] = (G[3] + ((G[2] << 8)  | (G[2] >>> 24)) + G[1]) | 0;
-	        X[4] = (G[4] + ((G[3] << 16) | (G[3] >>> 16)) + ((G[2] << 16) | (G[2] >>> 16))) | 0;
-	        X[5] = (G[5] + ((G[4] << 8)  | (G[4] >>> 24)) + G[3]) | 0;
-	        X[6] = (G[6] + ((G[5] << 16) | (G[5] >>> 16)) + ((G[4] << 16) | (G[4] >>> 16))) | 0;
-	        X[7] = (G[7] + ((G[6] << 8)  | (G[6] >>> 24)) + G[5]) | 0;
-	    }
-
-	    /**
-	     * Shortcut functions to the cipher's object interface.
-	     *
-	     * @example
-	     *
-	     *     var ciphertext = CryptoJS.Rabbit.encrypt(message, key, cfg);
-	     *     var plaintext  = CryptoJS.Rabbit.decrypt(ciphertext, key, cfg);
-	     */
-	    C.Rabbit = StreamCipher._createHelper(Rabbit);
-	}());
-
-
-	return CryptoJS.Rabbit;
-
-}));
-},{"./cipher-core":8,"./core":9,"./enc-base64":10,"./evpkdf":12,"./md5":17}],31:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./enc-base64"), require("./md5"), require("./evpkdf"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./enc-base64", "./md5", "./evpkdf", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var StreamCipher = C_lib.StreamCipher;
-	    var C_algo = C.algo;
-
-	    /**
-	     * RC4 stream cipher algorithm.
-	     */
-	    var RC4 = C_algo.RC4 = StreamCipher.extend({
-	        _doReset: function () {
-	            // Shortcuts
-	            var key = this._key;
-	            var keyWords = key.words;
-	            var keySigBytes = key.sigBytes;
-
-	            // Init sbox
-	            var S = this._S = [];
-	            for (var i = 0; i < 256; i++) {
-	                S[i] = i;
-	            }
-
-	            // Key setup
-	            for (var i = 0, j = 0; i < 256; i++) {
-	                var keyByteIndex = i % keySigBytes;
-	                var keyByte = (keyWords[keyByteIndex >>> 2] >>> (24 - (keyByteIndex % 4) * 8)) & 0xff;
-
-	                j = (j + S[i] + keyByte) % 256;
-
-	                // Swap
-	                var t = S[i];
-	                S[i] = S[j];
-	                S[j] = t;
-	            }
-
-	            // Counters
-	            this._i = this._j = 0;
-	        },
-
-	        _doProcessBlock: function (M, offset) {
-	            M[offset] ^= generateKeystreamWord.call(this);
-	        },
-
-	        keySize: 256/32,
-
-	        ivSize: 0
-	    });
-
-	    function generateKeystreamWord() {
-	        // Shortcuts
-	        var S = this._S;
-	        var i = this._i;
-	        var j = this._j;
-
-	        // Generate keystream word
-	        var keystreamWord = 0;
-	        for (var n = 0; n < 4; n++) {
-	            i = (i + 1) % 256;
-	            j = (j + S[i]) % 256;
-
-	            // Swap
-	            var t = S[i];
-	            S[i] = S[j];
-	            S[j] = t;
-
-	            keystreamWord |= S[(S[i] + S[j]) % 256] << (24 - n * 8);
-	        }
-
-	        // Update counters
-	        this._i = i;
-	        this._j = j;
-
-	        return keystreamWord;
-	    }
-
-	    /**
-	     * Shortcut functions to the cipher's object interface.
-	     *
-	     * @example
-	     *
-	     *     var ciphertext = CryptoJS.RC4.encrypt(message, key, cfg);
-	     *     var plaintext  = CryptoJS.RC4.decrypt(ciphertext, key, cfg);
-	     */
-	    C.RC4 = StreamCipher._createHelper(RC4);
-
-	    /**
-	     * Modified RC4 stream cipher algorithm.
-	     */
-	    var RC4Drop = C_algo.RC4Drop = RC4.extend({
-	        /**
-	         * Configuration options.
-	         *
-	         * @property {number} drop The number of keystream words to drop. Default 192
-	         */
-	        cfg: RC4.cfg.extend({
-	            drop: 192
-	        }),
-
-	        _doReset: function () {
-	            RC4._doReset.call(this);
-
-	            // Drop
-	            for (var i = this.cfg.drop; i > 0; i--) {
-	                generateKeystreamWord.call(this);
-	            }
-	        }
-	    });
-
-	    /**
-	     * Shortcut functions to the cipher's object interface.
-	     *
-	     * @example
-	     *
-	     *     var ciphertext = CryptoJS.RC4Drop.encrypt(message, key, cfg);
-	     *     var plaintext  = CryptoJS.RC4Drop.decrypt(ciphertext, key, cfg);
-	     */
-	    C.RC4Drop = StreamCipher._createHelper(RC4Drop);
-	}());
-
-
-	return CryptoJS.RC4;
-
-}));
-},{"./cipher-core":8,"./core":9,"./enc-base64":10,"./evpkdf":12,"./md5":17}],32:[function(require,module,exports){
-;(function (root, factory) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	/** @preserve
-	(c) 2012 by Cédric Mesnil. All rights reserved.
-
-	Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
-
-	    - Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
-	    - Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the documentation and/or other materials provided with the distribution.
-
-	THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-	*/
-
-	(function (Math) {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var WordArray = C_lib.WordArray;
-	    var Hasher = C_lib.Hasher;
-	    var C_algo = C.algo;
-
-	    // Constants table
-	    var _zl = WordArray.create([
-	        0,  1,  2,  3,  4,  5,  6,  7,  8,  9, 10, 11, 12, 13, 14, 15,
-	        7,  4, 13,  1, 10,  6, 15,  3, 12,  0,  9,  5,  2, 14, 11,  8,
-	        3, 10, 14,  4,  9, 15,  8,  1,  2,  7,  0,  6, 13, 11,  5, 12,
-	        1,  9, 11, 10,  0,  8, 12,  4, 13,  3,  7, 15, 14,  5,  6,  2,
-	        4,  0,  5,  9,  7, 12,  2, 10, 14,  1,  3,  8, 11,  6, 15, 13]);
-	    var _zr = WordArray.create([
-	        5, 14,  7,  0,  9,  2, 11,  4, 13,  6, 15,  8,  1, 10,  3, 12,
-	        6, 11,  3,  7,  0, 13,  5, 10, 14, 15,  8, 12,  4,  9,  1,  2,
-	        15,  5,  1,  3,  7, 14,  6,  9, 11,  8, 12,  2, 10,  0,  4, 13,
-	        8,  6,  4,  1,  3, 11, 15,  0,  5, 12,  2, 13,  9,  7, 10, 14,
-	        12, 15, 10,  4,  1,  5,  8,  7,  6,  2, 13, 14,  0,  3,  9, 11]);
-	    var _sl = WordArray.create([
-	         11, 14, 15, 12,  5,  8,  7,  9, 11, 13, 14, 15,  6,  7,  9,  8,
-	        7, 6,   8, 13, 11,  9,  7, 15,  7, 12, 15,  9, 11,  7, 13, 12,
-	        11, 13,  6,  7, 14,  9, 13, 15, 14,  8, 13,  6,  5, 12,  7,  5,
-	          11, 12, 14, 15, 14, 15,  9,  8,  9, 14,  5,  6,  8,  6,  5, 12,
-	        9, 15,  5, 11,  6,  8, 13, 12,  5, 12, 13, 14, 11,  8,  5,  6 ]);
-	    var _sr = WordArray.create([
-	        8,  9,  9, 11, 13, 15, 15,  5,  7,  7,  8, 11, 14, 14, 12,  6,
-	        9, 13, 15,  7, 12,  8,  9, 11,  7,  7, 12,  7,  6, 15, 13, 11,
-	        9,  7, 15, 11,  8,  6,  6, 14, 12, 13,  5, 14, 13, 13,  7,  5,
-	        15,  5,  8, 11, 14, 14,  6, 14,  6,  9, 12,  9, 12,  5, 15,  8,
-	        8,  5, 12,  9, 12,  5, 14,  6,  8, 13,  6,  5, 15, 13, 11, 11 ]);
-
-	    var _hl =  WordArray.create([ 0x00000000, 0x5A827999, 0x6ED9EBA1, 0x8F1BBCDC, 0xA953FD4E]);
-	    var _hr =  WordArray.create([ 0x50A28BE6, 0x5C4DD124, 0x6D703EF3, 0x7A6D76E9, 0x00000000]);
-
-	    /**
-	     * RIPEMD160 hash algorithm.
-	     */
-	    var RIPEMD160 = C_algo.RIPEMD160 = Hasher.extend({
-	        _doReset: function () {
-	            this._hash  = WordArray.create([0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0]);
-	        },
-
-	        _doProcessBlock: function (M, offset) {
-
-	            // Swap endian
-	            for (var i = 0; i < 16; i++) {
-	                // Shortcuts
-	                var offset_i = offset + i;
-	                var M_offset_i = M[offset_i];
-
-	                // Swap
-	                M[offset_i] = (
-	                    (((M_offset_i << 8)  | (M_offset_i >>> 24)) & 0x00ff00ff) |
-	                    (((M_offset_i << 24) | (M_offset_i >>> 8))  & 0xff00ff00)
-	                );
-	            }
-	            // Shortcut
-	            var H  = this._hash.words;
-	            var hl = _hl.words;
-	            var hr = _hr.words;
-	            var zl = _zl.words;
-	            var zr = _zr.words;
-	            var sl = _sl.words;
-	            var sr = _sr.words;
-
-	            // Working variables
-	            var al, bl, cl, dl, el;
-	            var ar, br, cr, dr, er;
-
-	            ar = al = H[0];
-	            br = bl = H[1];
-	            cr = cl = H[2];
-	            dr = dl = H[3];
-	            er = el = H[4];
-	            // Computation
-	            var t;
-	            for (var i = 0; i < 80; i += 1) {
-	                t = (al +  M[offset+zl[i]])|0;
-	                if (i<16){
-		            t +=  f1(bl,cl,dl) + hl[0];
-	                } else if (i<32) {
-		            t +=  f2(bl,cl,dl) + hl[1];
-	                } else if (i<48) {
-		            t +=  f3(bl,cl,dl) + hl[2];
-	                } else if (i<64) {
-		            t +=  f4(bl,cl,dl) + hl[3];
-	                } else {// if (i<80) {
-		            t +=  f5(bl,cl,dl) + hl[4];
-	                }
-	                t = t|0;
-	                t =  rotl(t,sl[i]);
-	                t = (t+el)|0;
-	                al = el;
-	                el = dl;
-	                dl = rotl(cl, 10);
-	                cl = bl;
-	                bl = t;
-
-	                t = (ar + M[offset+zr[i]])|0;
-	                if (i<16){
-		            t +=  f5(br,cr,dr) + hr[0];
-	                } else if (i<32) {
-		            t +=  f4(br,cr,dr) + hr[1];
-	                } else if (i<48) {
-		            t +=  f3(br,cr,dr) + hr[2];
-	                } else if (i<64) {
-		            t +=  f2(br,cr,dr) + hr[3];
-	                } else {// if (i<80) {
-		            t +=  f1(br,cr,dr) + hr[4];
-	                }
-	                t = t|0;
-	                t =  rotl(t,sr[i]) ;
-	                t = (t+er)|0;
-	                ar = er;
-	                er = dr;
-	                dr = rotl(cr, 10);
-	                cr = br;
-	                br = t;
-	            }
-	            // Intermediate hash value
-	            t    = (H[1] + cl + dr)|0;
-	            H[1] = (H[2] + dl + er)|0;
-	            H[2] = (H[3] + el + ar)|0;
-	            H[3] = (H[4] + al + br)|0;
-	            H[4] = (H[0] + bl + cr)|0;
-	            H[0] =  t;
-	        },
-
-	        _doFinalize: function () {
-	            // Shortcuts
-	            var data = this._data;
-	            var dataWords = data.words;
-
-	            var nBitsTotal = this._nDataBytes * 8;
-	            var nBitsLeft = data.sigBytes * 8;
-
-	            // Add padding
-	            dataWords[nBitsLeft >>> 5] |= 0x80 << (24 - nBitsLeft % 32);
-	            dataWords[(((nBitsLeft + 64) >>> 9) << 4) + 14] = (
-	                (((nBitsTotal << 8)  | (nBitsTotal >>> 24)) & 0x00ff00ff) |
-	                (((nBitsTotal << 24) | (nBitsTotal >>> 8))  & 0xff00ff00)
-	            );
-	            data.sigBytes = (dataWords.length + 1) * 4;
-
-	            // Hash final blocks
-	            this._process();
-
-	            // Shortcuts
-	            var hash = this._hash;
-	            var H = hash.words;
-
-	            // Swap endian
-	            for (var i = 0; i < 5; i++) {
-	                // Shortcut
-	                var H_i = H[i];
-
-	                // Swap
-	                H[i] = (((H_i << 8)  | (H_i >>> 24)) & 0x00ff00ff) |
-	                       (((H_i << 24) | (H_i >>> 8))  & 0xff00ff00);
-	            }
-
-	            // Return final computed hash
-	            return hash;
-	        },
-
-	        clone: function () {
-	            var clone = Hasher.clone.call(this);
-	            clone._hash = this._hash.clone();
-
-	            return clone;
-	        }
-	    });
-
-
-	    function f1(x, y, z) {
-	        return ((x) ^ (y) ^ (z));
-
-	    }
-
-	    function f2(x, y, z) {
-	        return (((x)&(y)) | ((~x)&(z)));
-	    }
-
-	    function f3(x, y, z) {
-	        return (((x) | (~(y))) ^ (z));
-	    }
-
-	    function f4(x, y, z) {
-	        return (((x) & (z)) | ((y)&(~(z))));
-	    }
-
-	    function f5(x, y, z) {
-	        return ((x) ^ ((y) |(~(z))));
-
-	    }
-
-	    function rotl(x,n) {
-	        return (x<<n) | (x>>>(32-n));
-	    }
-
-
-	    /**
-	     * Shortcut function to the hasher's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     *
-	     * @return {WordArray} The hash.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hash = CryptoJS.RIPEMD160('message');
-	     *     var hash = CryptoJS.RIPEMD160(wordArray);
-	     */
-	    C.RIPEMD160 = Hasher._createHelper(RIPEMD160);
-
-	    /**
-	     * Shortcut function to the HMAC's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     * @param {WordArray|string} key The secret key.
-	     *
-	     * @return {WordArray} The HMAC.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hmac = CryptoJS.HmacRIPEMD160(message, key);
-	     */
-	    C.HmacRIPEMD160 = Hasher._createHmacHelper(RIPEMD160);
-	}(Math));
-
-
-	return CryptoJS.RIPEMD160;
-
-}));
-},{"./core":9}],33:[function(require,module,exports){
-;(function (root, factory) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var WordArray = C_lib.WordArray;
-	    var Hasher = C_lib.Hasher;
-	    var C_algo = C.algo;
-
-	    // Reusable object
-	    var W = [];
-
-	    /**
-	     * SHA-1 hash algorithm.
-	     */
-	    var SHA1 = C_algo.SHA1 = Hasher.extend({
-	        _doReset: function () {
-	            this._hash = new WordArray.init([
-	                0x67452301, 0xefcdab89,
-	                0x98badcfe, 0x10325476,
-	                0xc3d2e1f0
-	            ]);
-	        },
-
-	        _doProcessBlock: function (M, offset) {
-	            // Shortcut
-	            var H = this._hash.words;
-
-	            // Working variables
-	            var a = H[0];
-	            var b = H[1];
-	            var c = H[2];
-	            var d = H[3];
-	            var e = H[4];
-
-	            // Computation
-	            for (var i = 0; i < 80; i++) {
-	                if (i < 16) {
-	                    W[i] = M[offset + i] | 0;
-	                } else {
-	                    var n = W[i - 3] ^ W[i - 8] ^ W[i - 14] ^ W[i - 16];
-	                    W[i] = (n << 1) | (n >>> 31);
-	                }
-
-	                var t = ((a << 5) | (a >>> 27)) + e + W[i];
-	                if (i < 20) {
-	                    t += ((b & c) | (~b & d)) + 0x5a827999;
-	                } else if (i < 40) {
-	                    t += (b ^ c ^ d) + 0x6ed9eba1;
-	                } else if (i < 60) {
-	                    t += ((b & c) | (b & d) | (c & d)) - 0x70e44324;
-	                } else /* if (i < 80) */ {
-	                    t += (b ^ c ^ d) - 0x359d3e2a;
-	                }
-
-	                e = d;
-	                d = c;
-	                c = (b << 30) | (b >>> 2);
-	                b = a;
-	                a = t;
-	            }
-
-	            // Intermediate hash value
-	            H[0] = (H[0] + a) | 0;
-	            H[1] = (H[1] + b) | 0;
-	            H[2] = (H[2] + c) | 0;
-	            H[3] = (H[3] + d) | 0;
-	            H[4] = (H[4] + e) | 0;
-	        },
-
-	        _doFinalize: function () {
-	            // Shortcuts
-	            var data = this._data;
-	            var dataWords = data.words;
-
-	            var nBitsTotal = this._nDataBytes * 8;
-	            var nBitsLeft = data.sigBytes * 8;
-
-	            // Add padding
-	            dataWords[nBitsLeft >>> 5] |= 0x80 << (24 - nBitsLeft % 32);
-	            dataWords[(((nBitsLeft + 64) >>> 9) << 4) + 14] = Math.floor(nBitsTotal / 0x100000000);
-	            dataWords[(((nBitsLeft + 64) >>> 9) << 4) + 15] = nBitsTotal;
-	            data.sigBytes = dataWords.length * 4;
-
-	            // Hash final blocks
-	            this._process();
-
-	            // Return final computed hash
-	            return this._hash;
-	        },
-
-	        clone: function () {
-	            var clone = Hasher.clone.call(this);
-	            clone._hash = this._hash.clone();
-
-	            return clone;
-	        }
-	    });
-
-	    /**
-	     * Shortcut function to the hasher's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     *
-	     * @return {WordArray} The hash.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hash = CryptoJS.SHA1('message');
-	     *     var hash = CryptoJS.SHA1(wordArray);
-	     */
-	    C.SHA1 = Hasher._createHelper(SHA1);
-
-	    /**
-	     * Shortcut function to the HMAC's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     * @param {WordArray|string} key The secret key.
-	     *
-	     * @return {WordArray} The HMAC.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hmac = CryptoJS.HmacSHA1(message, key);
-	     */
-	    C.HmacSHA1 = Hasher._createHmacHelper(SHA1);
-	}());
-
-
-	return CryptoJS.SHA1;
-
-}));
-},{"./core":9}],34:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./sha256"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./sha256"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var WordArray = C_lib.WordArray;
-	    var C_algo = C.algo;
-	    var SHA256 = C_algo.SHA256;
-
-	    /**
-	     * SHA-224 hash algorithm.
-	     */
-	    var SHA224 = C_algo.SHA224 = SHA256.extend({
-	        _doReset: function () {
-	            this._hash = new WordArray.init([
-	                0xc1059ed8, 0x367cd507, 0x3070dd17, 0xf70e5939,
-	                0xffc00b31, 0x68581511, 0x64f98fa7, 0xbefa4fa4
-	            ]);
-	        },
-
-	        _doFinalize: function () {
-	            var hash = SHA256._doFinalize.call(this);
-
-	            hash.sigBytes -= 4;
-
-	            return hash;
-	        }
-	    });
-
-	    /**
-	     * Shortcut function to the hasher's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     *
-	     * @return {WordArray} The hash.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hash = CryptoJS.SHA224('message');
-	     *     var hash = CryptoJS.SHA224(wordArray);
-	     */
-	    C.SHA224 = SHA256._createHelper(SHA224);
-
-	    /**
-	     * Shortcut function to the HMAC's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     * @param {WordArray|string} key The secret key.
-	     *
-	     * @return {WordArray} The HMAC.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hmac = CryptoJS.HmacSHA224(message, key);
-	     */
-	    C.HmacSHA224 = SHA256._createHmacHelper(SHA224);
-	}());
-
-
-	return CryptoJS.SHA224;
-
-}));
-},{"./core":9,"./sha256":35}],35:[function(require,module,exports){
+},{"./core":7}],11:[function(require,module,exports){
 ;(function (root, factory) {
 	if (typeof exports === "object") {
 		// CommonJS
@@ -6690,1815 +3050,7 @@ function objectToString(o) {
 	return CryptoJS.SHA256;
 
 }));
-},{"./core":9}],36:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./x64-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./x64-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function (Math) {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var WordArray = C_lib.WordArray;
-	    var Hasher = C_lib.Hasher;
-	    var C_x64 = C.x64;
-	    var X64Word = C_x64.Word;
-	    var C_algo = C.algo;
-
-	    // Constants tables
-	    var RHO_OFFSETS = [];
-	    var PI_INDEXES  = [];
-	    var ROUND_CONSTANTS = [];
-
-	    // Compute Constants
-	    (function () {
-	        // Compute rho offset constants
-	        var x = 1, y = 0;
-	        for (var t = 0; t < 24; t++) {
-	            RHO_OFFSETS[x + 5 * y] = ((t + 1) * (t + 2) / 2) % 64;
-
-	            var newX = y % 5;
-	            var newY = (2 * x + 3 * y) % 5;
-	            x = newX;
-	            y = newY;
-	        }
-
-	        // Compute pi index constants
-	        for (var x = 0; x < 5; x++) {
-	            for (var y = 0; y < 5; y++) {
-	                PI_INDEXES[x + 5 * y] = y + ((2 * x + 3 * y) % 5) * 5;
-	            }
-	        }
-
-	        // Compute round constants
-	        var LFSR = 0x01;
-	        for (var i = 0; i < 24; i++) {
-	            var roundConstantMsw = 0;
-	            var roundConstantLsw = 0;
-
-	            for (var j = 0; j < 7; j++) {
-	                if (LFSR & 0x01) {
-	                    var bitPosition = (1 << j) - 1;
-	                    if (bitPosition < 32) {
-	                        roundConstantLsw ^= 1 << bitPosition;
-	                    } else /* if (bitPosition >= 32) */ {
-	                        roundConstantMsw ^= 1 << (bitPosition - 32);
-	                    }
-	                }
-
-	                // Compute next LFSR
-	                if (LFSR & 0x80) {
-	                    // Primitive polynomial over GF(2): x^8 + x^6 + x^5 + x^4 + 1
-	                    LFSR = (LFSR << 1) ^ 0x71;
-	                } else {
-	                    LFSR <<= 1;
-	                }
-	            }
-
-	            ROUND_CONSTANTS[i] = X64Word.create(roundConstantMsw, roundConstantLsw);
-	        }
-	    }());
-
-	    // Reusable objects for temporary values
-	    var T = [];
-	    (function () {
-	        for (var i = 0; i < 25; i++) {
-	            T[i] = X64Word.create();
-	        }
-	    }());
-
-	    /**
-	     * SHA-3 hash algorithm.
-	     */
-	    var SHA3 = C_algo.SHA3 = Hasher.extend({
-	        /**
-	         * Configuration options.
-	         *
-	         * @property {number} outputLength
-	         *   The desired number of bits in the output hash.
-	         *   Only values permitted are: 224, 256, 384, 512.
-	         *   Default: 512
-	         */
-	        cfg: Hasher.cfg.extend({
-	            outputLength: 512
-	        }),
-
-	        _doReset: function () {
-	            var state = this._state = []
-	            for (var i = 0; i < 25; i++) {
-	                state[i] = new X64Word.init();
-	            }
-
-	            this.blockSize = (1600 - 2 * this.cfg.outputLength) / 32;
-	        },
-
-	        _doProcessBlock: function (M, offset) {
-	            // Shortcuts
-	            var state = this._state;
-	            var nBlockSizeLanes = this.blockSize / 2;
-
-	            // Absorb
-	            for (var i = 0; i < nBlockSizeLanes; i++) {
-	                // Shortcuts
-	                var M2i  = M[offset + 2 * i];
-	                var M2i1 = M[offset + 2 * i + 1];
-
-	                // Swap endian
-	                M2i = (
-	                    (((M2i << 8)  | (M2i >>> 24)) & 0x00ff00ff) |
-	                    (((M2i << 24) | (M2i >>> 8))  & 0xff00ff00)
-	                );
-	                M2i1 = (
-	                    (((M2i1 << 8)  | (M2i1 >>> 24)) & 0x00ff00ff) |
-	                    (((M2i1 << 24) | (M2i1 >>> 8))  & 0xff00ff00)
-	                );
-
-	                // Absorb message into state
-	                var lane = state[i];
-	                lane.high ^= M2i1;
-	                lane.low  ^= M2i;
-	            }
-
-	            // Rounds
-	            for (var round = 0; round < 24; round++) {
-	                // Theta
-	                for (var x = 0; x < 5; x++) {
-	                    // Mix column lanes
-	                    var tMsw = 0, tLsw = 0;
-	                    for (var y = 0; y < 5; y++) {
-	                        var lane = state[x + 5 * y];
-	                        tMsw ^= lane.high;
-	                        tLsw ^= lane.low;
-	                    }
-
-	                    // Temporary values
-	                    var Tx = T[x];
-	                    Tx.high = tMsw;
-	                    Tx.low  = tLsw;
-	                }
-	                for (var x = 0; x < 5; x++) {
-	                    // Shortcuts
-	                    var Tx4 = T[(x + 4) % 5];
-	                    var Tx1 = T[(x + 1) % 5];
-	                    var Tx1Msw = Tx1.high;
-	                    var Tx1Lsw = Tx1.low;
-
-	                    // Mix surrounding columns
-	                    var tMsw = Tx4.high ^ ((Tx1Msw << 1) | (Tx1Lsw >>> 31));
-	                    var tLsw = Tx4.low  ^ ((Tx1Lsw << 1) | (Tx1Msw >>> 31));
-	                    for (var y = 0; y < 5; y++) {
-	                        var lane = state[x + 5 * y];
-	                        lane.high ^= tMsw;
-	                        lane.low  ^= tLsw;
-	                    }
-	                }
-
-	                // Rho Pi
-	                for (var laneIndex = 1; laneIndex < 25; laneIndex++) {
-	                    // Shortcuts
-	                    var lane = state[laneIndex];
-	                    var laneMsw = lane.high;
-	                    var laneLsw = lane.low;
-	                    var rhoOffset = RHO_OFFSETS[laneIndex];
-
-	                    // Rotate lanes
-	                    if (rhoOffset < 32) {
-	                        var tMsw = (laneMsw << rhoOffset) | (laneLsw >>> (32 - rhoOffset));
-	                        var tLsw = (laneLsw << rhoOffset) | (laneMsw >>> (32 - rhoOffset));
-	                    } else /* if (rhoOffset >= 32) */ {
-	                        var tMsw = (laneLsw << (rhoOffset - 32)) | (laneMsw >>> (64 - rhoOffset));
-	                        var tLsw = (laneMsw << (rhoOffset - 32)) | (laneLsw >>> (64 - rhoOffset));
-	                    }
-
-	                    // Transpose lanes
-	                    var TPiLane = T[PI_INDEXES[laneIndex]];
-	                    TPiLane.high = tMsw;
-	                    TPiLane.low  = tLsw;
-	                }
-
-	                // Rho pi at x = y = 0
-	                var T0 = T[0];
-	                var state0 = state[0];
-	                T0.high = state0.high;
-	                T0.low  = state0.low;
-
-	                // Chi
-	                for (var x = 0; x < 5; x++) {
-	                    for (var y = 0; y < 5; y++) {
-	                        // Shortcuts
-	                        var laneIndex = x + 5 * y;
-	                        var lane = state[laneIndex];
-	                        var TLane = T[laneIndex];
-	                        var Tx1Lane = T[((x + 1) % 5) + 5 * y];
-	                        var Tx2Lane = T[((x + 2) % 5) + 5 * y];
-
-	                        // Mix rows
-	                        lane.high = TLane.high ^ (~Tx1Lane.high & Tx2Lane.high);
-	                        lane.low  = TLane.low  ^ (~Tx1Lane.low  & Tx2Lane.low);
-	                    }
-	                }
-
-	                // Iota
-	                var lane = state[0];
-	                var roundConstant = ROUND_CONSTANTS[round];
-	                lane.high ^= roundConstant.high;
-	                lane.low  ^= roundConstant.low;;
-	            }
-	        },
-
-	        _doFinalize: function () {
-	            // Shortcuts
-	            var data = this._data;
-	            var dataWords = data.words;
-	            var nBitsTotal = this._nDataBytes * 8;
-	            var nBitsLeft = data.sigBytes * 8;
-	            var blockSizeBits = this.blockSize * 32;
-
-	            // Add padding
-	            dataWords[nBitsLeft >>> 5] |= 0x1 << (24 - nBitsLeft % 32);
-	            dataWords[((Math.ceil((nBitsLeft + 1) / blockSizeBits) * blockSizeBits) >>> 5) - 1] |= 0x80;
-	            data.sigBytes = dataWords.length * 4;
-
-	            // Hash final blocks
-	            this._process();
-
-	            // Shortcuts
-	            var state = this._state;
-	            var outputLengthBytes = this.cfg.outputLength / 8;
-	            var outputLengthLanes = outputLengthBytes / 8;
-
-	            // Squeeze
-	            var hashWords = [];
-	            for (var i = 0; i < outputLengthLanes; i++) {
-	                // Shortcuts
-	                var lane = state[i];
-	                var laneMsw = lane.high;
-	                var laneLsw = lane.low;
-
-	                // Swap endian
-	                laneMsw = (
-	                    (((laneMsw << 8)  | (laneMsw >>> 24)) & 0x00ff00ff) |
-	                    (((laneMsw << 24) | (laneMsw >>> 8))  & 0xff00ff00)
-	                );
-	                laneLsw = (
-	                    (((laneLsw << 8)  | (laneLsw >>> 24)) & 0x00ff00ff) |
-	                    (((laneLsw << 24) | (laneLsw >>> 8))  & 0xff00ff00)
-	                );
-
-	                // Squeeze state to retrieve hash
-	                hashWords.push(laneLsw);
-	                hashWords.push(laneMsw);
-	            }
-
-	            // Return final computed hash
-	            return new WordArray.init(hashWords, outputLengthBytes);
-	        },
-
-	        clone: function () {
-	            var clone = Hasher.clone.call(this);
-
-	            var state = clone._state = this._state.slice(0);
-	            for (var i = 0; i < 25; i++) {
-	                state[i] = state[i].clone();
-	            }
-
-	            return clone;
-	        }
-	    });
-
-	    /**
-	     * Shortcut function to the hasher's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     *
-	     * @return {WordArray} The hash.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hash = CryptoJS.SHA3('message');
-	     *     var hash = CryptoJS.SHA3(wordArray);
-	     */
-	    C.SHA3 = Hasher._createHelper(SHA3);
-
-	    /**
-	     * Shortcut function to the HMAC's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     * @param {WordArray|string} key The secret key.
-	     *
-	     * @return {WordArray} The HMAC.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hmac = CryptoJS.HmacSHA3(message, key);
-	     */
-	    C.HmacSHA3 = Hasher._createHmacHelper(SHA3);
-	}(Math));
-
-
-	return CryptoJS.SHA3;
-
-}));
-},{"./core":9,"./x64-core":40}],37:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./x64-core"), require("./sha512"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./x64-core", "./sha512"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_x64 = C.x64;
-	    var X64Word = C_x64.Word;
-	    var X64WordArray = C_x64.WordArray;
-	    var C_algo = C.algo;
-	    var SHA512 = C_algo.SHA512;
-
-	    /**
-	     * SHA-384 hash algorithm.
-	     */
-	    var SHA384 = C_algo.SHA384 = SHA512.extend({
-	        _doReset: function () {
-	            this._hash = new X64WordArray.init([
-	                new X64Word.init(0xcbbb9d5d, 0xc1059ed8), new X64Word.init(0x629a292a, 0x367cd507),
-	                new X64Word.init(0x9159015a, 0x3070dd17), new X64Word.init(0x152fecd8, 0xf70e5939),
-	                new X64Word.init(0x67332667, 0xffc00b31), new X64Word.init(0x8eb44a87, 0x68581511),
-	                new X64Word.init(0xdb0c2e0d, 0x64f98fa7), new X64Word.init(0x47b5481d, 0xbefa4fa4)
-	            ]);
-	        },
-
-	        _doFinalize: function () {
-	            var hash = SHA512._doFinalize.call(this);
-
-	            hash.sigBytes -= 16;
-
-	            return hash;
-	        }
-	    });
-
-	    /**
-	     * Shortcut function to the hasher's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     *
-	     * @return {WordArray} The hash.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hash = CryptoJS.SHA384('message');
-	     *     var hash = CryptoJS.SHA384(wordArray);
-	     */
-	    C.SHA384 = SHA512._createHelper(SHA384);
-
-	    /**
-	     * Shortcut function to the HMAC's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     * @param {WordArray|string} key The secret key.
-	     *
-	     * @return {WordArray} The HMAC.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hmac = CryptoJS.HmacSHA384(message, key);
-	     */
-	    C.HmacSHA384 = SHA512._createHmacHelper(SHA384);
-	}());
-
-
-	return CryptoJS.SHA384;
-
-}));
-},{"./core":9,"./sha512":38,"./x64-core":40}],38:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./x64-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./x64-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var Hasher = C_lib.Hasher;
-	    var C_x64 = C.x64;
-	    var X64Word = C_x64.Word;
-	    var X64WordArray = C_x64.WordArray;
-	    var C_algo = C.algo;
-
-	    function X64Word_create() {
-	        return X64Word.create.apply(X64Word, arguments);
-	    }
-
-	    // Constants
-	    var K = [
-	        X64Word_create(0x428a2f98, 0xd728ae22), X64Word_create(0x71374491, 0x23ef65cd),
-	        X64Word_create(0xb5c0fbcf, 0xec4d3b2f), X64Word_create(0xe9b5dba5, 0x8189dbbc),
-	        X64Word_create(0x3956c25b, 0xf348b538), X64Word_create(0x59f111f1, 0xb605d019),
-	        X64Word_create(0x923f82a4, 0xaf194f9b), X64Word_create(0xab1c5ed5, 0xda6d8118),
-	        X64Word_create(0xd807aa98, 0xa3030242), X64Word_create(0x12835b01, 0x45706fbe),
-	        X64Word_create(0x243185be, 0x4ee4b28c), X64Word_create(0x550c7dc3, 0xd5ffb4e2),
-	        X64Word_create(0x72be5d74, 0xf27b896f), X64Word_create(0x80deb1fe, 0x3b1696b1),
-	        X64Word_create(0x9bdc06a7, 0x25c71235), X64Word_create(0xc19bf174, 0xcf692694),
-	        X64Word_create(0xe49b69c1, 0x9ef14ad2), X64Word_create(0xefbe4786, 0x384f25e3),
-	        X64Word_create(0x0fc19dc6, 0x8b8cd5b5), X64Word_create(0x240ca1cc, 0x77ac9c65),
-	        X64Word_create(0x2de92c6f, 0x592b0275), X64Word_create(0x4a7484aa, 0x6ea6e483),
-	        X64Word_create(0x5cb0a9dc, 0xbd41fbd4), X64Word_create(0x76f988da, 0x831153b5),
-	        X64Word_create(0x983e5152, 0xee66dfab), X64Word_create(0xa831c66d, 0x2db43210),
-	        X64Word_create(0xb00327c8, 0x98fb213f), X64Word_create(0xbf597fc7, 0xbeef0ee4),
-	        X64Word_create(0xc6e00bf3, 0x3da88fc2), X64Word_create(0xd5a79147, 0x930aa725),
-	        X64Word_create(0x06ca6351, 0xe003826f), X64Word_create(0x14292967, 0x0a0e6e70),
-	        X64Word_create(0x27b70a85, 0x46d22ffc), X64Word_create(0x2e1b2138, 0x5c26c926),
-	        X64Word_create(0x4d2c6dfc, 0x5ac42aed), X64Word_create(0x53380d13, 0x9d95b3df),
-	        X64Word_create(0x650a7354, 0x8baf63de), X64Word_create(0x766a0abb, 0x3c77b2a8),
-	        X64Word_create(0x81c2c92e, 0x47edaee6), X64Word_create(0x92722c85, 0x1482353b),
-	        X64Word_create(0xa2bfe8a1, 0x4cf10364), X64Word_create(0xa81a664b, 0xbc423001),
-	        X64Word_create(0xc24b8b70, 0xd0f89791), X64Word_create(0xc76c51a3, 0x0654be30),
-	        X64Word_create(0xd192e819, 0xd6ef5218), X64Word_create(0xd6990624, 0x5565a910),
-	        X64Word_create(0xf40e3585, 0x5771202a), X64Word_create(0x106aa070, 0x32bbd1b8),
-	        X64Word_create(0x19a4c116, 0xb8d2d0c8), X64Word_create(0x1e376c08, 0x5141ab53),
-	        X64Word_create(0x2748774c, 0xdf8eeb99), X64Word_create(0x34b0bcb5, 0xe19b48a8),
-	        X64Word_create(0x391c0cb3, 0xc5c95a63), X64Word_create(0x4ed8aa4a, 0xe3418acb),
-	        X64Word_create(0x5b9cca4f, 0x7763e373), X64Word_create(0x682e6ff3, 0xd6b2b8a3),
-	        X64Word_create(0x748f82ee, 0x5defb2fc), X64Word_create(0x78a5636f, 0x43172f60),
-	        X64Word_create(0x84c87814, 0xa1f0ab72), X64Word_create(0x8cc70208, 0x1a6439ec),
-	        X64Word_create(0x90befffa, 0x23631e28), X64Word_create(0xa4506ceb, 0xde82bde9),
-	        X64Word_create(0xbef9a3f7, 0xb2c67915), X64Word_create(0xc67178f2, 0xe372532b),
-	        X64Word_create(0xca273ece, 0xea26619c), X64Word_create(0xd186b8c7, 0x21c0c207),
-	        X64Word_create(0xeada7dd6, 0xcde0eb1e), X64Word_create(0xf57d4f7f, 0xee6ed178),
-	        X64Word_create(0x06f067aa, 0x72176fba), X64Word_create(0x0a637dc5, 0xa2c898a6),
-	        X64Word_create(0x113f9804, 0xbef90dae), X64Word_create(0x1b710b35, 0x131c471b),
-	        X64Word_create(0x28db77f5, 0x23047d84), X64Word_create(0x32caab7b, 0x40c72493),
-	        X64Word_create(0x3c9ebe0a, 0x15c9bebc), X64Word_create(0x431d67c4, 0x9c100d4c),
-	        X64Word_create(0x4cc5d4be, 0xcb3e42b6), X64Word_create(0x597f299c, 0xfc657e2a),
-	        X64Word_create(0x5fcb6fab, 0x3ad6faec), X64Word_create(0x6c44198c, 0x4a475817)
-	    ];
-
-	    // Reusable objects
-	    var W = [];
-	    (function () {
-	        for (var i = 0; i < 80; i++) {
-	            W[i] = X64Word_create();
-	        }
-	    }());
-
-	    /**
-	     * SHA-512 hash algorithm.
-	     */
-	    var SHA512 = C_algo.SHA512 = Hasher.extend({
-	        _doReset: function () {
-	            this._hash = new X64WordArray.init([
-	                new X64Word.init(0x6a09e667, 0xf3bcc908), new X64Word.init(0xbb67ae85, 0x84caa73b),
-	                new X64Word.init(0x3c6ef372, 0xfe94f82b), new X64Word.init(0xa54ff53a, 0x5f1d36f1),
-	                new X64Word.init(0x510e527f, 0xade682d1), new X64Word.init(0x9b05688c, 0x2b3e6c1f),
-	                new X64Word.init(0x1f83d9ab, 0xfb41bd6b), new X64Word.init(0x5be0cd19, 0x137e2179)
-	            ]);
-	        },
-
-	        _doProcessBlock: function (M, offset) {
-	            // Shortcuts
-	            var H = this._hash.words;
-
-	            var H0 = H[0];
-	            var H1 = H[1];
-	            var H2 = H[2];
-	            var H3 = H[3];
-	            var H4 = H[4];
-	            var H5 = H[5];
-	            var H6 = H[6];
-	            var H7 = H[7];
-
-	            var H0h = H0.high;
-	            var H0l = H0.low;
-	            var H1h = H1.high;
-	            var H1l = H1.low;
-	            var H2h = H2.high;
-	            var H2l = H2.low;
-	            var H3h = H3.high;
-	            var H3l = H3.low;
-	            var H4h = H4.high;
-	            var H4l = H4.low;
-	            var H5h = H5.high;
-	            var H5l = H5.low;
-	            var H6h = H6.high;
-	            var H6l = H6.low;
-	            var H7h = H7.high;
-	            var H7l = H7.low;
-
-	            // Working variables
-	            var ah = H0h;
-	            var al = H0l;
-	            var bh = H1h;
-	            var bl = H1l;
-	            var ch = H2h;
-	            var cl = H2l;
-	            var dh = H3h;
-	            var dl = H3l;
-	            var eh = H4h;
-	            var el = H4l;
-	            var fh = H5h;
-	            var fl = H5l;
-	            var gh = H6h;
-	            var gl = H6l;
-	            var hh = H7h;
-	            var hl = H7l;
-
-	            // Rounds
-	            for (var i = 0; i < 80; i++) {
-	                // Shortcut
-	                var Wi = W[i];
-
-	                // Extend message
-	                if (i < 16) {
-	                    var Wih = Wi.high = M[offset + i * 2]     | 0;
-	                    var Wil = Wi.low  = M[offset + i * 2 + 1] | 0;
-	                } else {
-	                    // Gamma0
-	                    var gamma0x  = W[i - 15];
-	                    var gamma0xh = gamma0x.high;
-	                    var gamma0xl = gamma0x.low;
-	                    var gamma0h  = ((gamma0xh >>> 1) | (gamma0xl << 31)) ^ ((gamma0xh >>> 8) | (gamma0xl << 24)) ^ (gamma0xh >>> 7);
-	                    var gamma0l  = ((gamma0xl >>> 1) | (gamma0xh << 31)) ^ ((gamma0xl >>> 8) | (gamma0xh << 24)) ^ ((gamma0xl >>> 7) | (gamma0xh << 25));
-
-	                    // Gamma1
-	                    var gamma1x  = W[i - 2];
-	                    var gamma1xh = gamma1x.high;
-	                    var gamma1xl = gamma1x.low;
-	                    var gamma1h  = ((gamma1xh >>> 19) | (gamma1xl << 13)) ^ ((gamma1xh << 3) | (gamma1xl >>> 29)) ^ (gamma1xh >>> 6);
-	                    var gamma1l  = ((gamma1xl >>> 19) | (gamma1xh << 13)) ^ ((gamma1xl << 3) | (gamma1xh >>> 29)) ^ ((gamma1xl >>> 6) | (gamma1xh << 26));
-
-	                    // W[i] = gamma0 + W[i - 7] + gamma1 + W[i - 16]
-	                    var Wi7  = W[i - 7];
-	                    var Wi7h = Wi7.high;
-	                    var Wi7l = Wi7.low;
-
-	                    var Wi16  = W[i - 16];
-	                    var Wi16h = Wi16.high;
-	                    var Wi16l = Wi16.low;
-
-	                    var Wil = gamma0l + Wi7l;
-	                    var Wih = gamma0h + Wi7h + ((Wil >>> 0) < (gamma0l >>> 0) ? 1 : 0);
-	                    var Wil = Wil + gamma1l;
-	                    var Wih = Wih + gamma1h + ((Wil >>> 0) < (gamma1l >>> 0) ? 1 : 0);
-	                    var Wil = Wil + Wi16l;
-	                    var Wih = Wih + Wi16h + ((Wil >>> 0) < (Wi16l >>> 0) ? 1 : 0);
-
-	                    Wi.high = Wih;
-	                    Wi.low  = Wil;
-	                }
-
-	                var chh  = (eh & fh) ^ (~eh & gh);
-	                var chl  = (el & fl) ^ (~el & gl);
-	                var majh = (ah & bh) ^ (ah & ch) ^ (bh & ch);
-	                var majl = (al & bl) ^ (al & cl) ^ (bl & cl);
-
-	                var sigma0h = ((ah >>> 28) | (al << 4))  ^ ((ah << 30)  | (al >>> 2)) ^ ((ah << 25) | (al >>> 7));
-	                var sigma0l = ((al >>> 28) | (ah << 4))  ^ ((al << 30)  | (ah >>> 2)) ^ ((al << 25) | (ah >>> 7));
-	                var sigma1h = ((eh >>> 14) | (el << 18)) ^ ((eh >>> 18) | (el << 14)) ^ ((eh << 23) | (el >>> 9));
-	                var sigma1l = ((el >>> 14) | (eh << 18)) ^ ((el >>> 18) | (eh << 14)) ^ ((el << 23) | (eh >>> 9));
-
-	                // t1 = h + sigma1 + ch + K[i] + W[i]
-	                var Ki  = K[i];
-	                var Kih = Ki.high;
-	                var Kil = Ki.low;
-
-	                var t1l = hl + sigma1l;
-	                var t1h = hh + sigma1h + ((t1l >>> 0) < (hl >>> 0) ? 1 : 0);
-	                var t1l = t1l + chl;
-	                var t1h = t1h + chh + ((t1l >>> 0) < (chl >>> 0) ? 1 : 0);
-	                var t1l = t1l + Kil;
-	                var t1h = t1h + Kih + ((t1l >>> 0) < (Kil >>> 0) ? 1 : 0);
-	                var t1l = t1l + Wil;
-	                var t1h = t1h + Wih + ((t1l >>> 0) < (Wil >>> 0) ? 1 : 0);
-
-	                // t2 = sigma0 + maj
-	                var t2l = sigma0l + majl;
-	                var t2h = sigma0h + majh + ((t2l >>> 0) < (sigma0l >>> 0) ? 1 : 0);
-
-	                // Update working variables
-	                hh = gh;
-	                hl = gl;
-	                gh = fh;
-	                gl = fl;
-	                fh = eh;
-	                fl = el;
-	                el = (dl + t1l) | 0;
-	                eh = (dh + t1h + ((el >>> 0) < (dl >>> 0) ? 1 : 0)) | 0;
-	                dh = ch;
-	                dl = cl;
-	                ch = bh;
-	                cl = bl;
-	                bh = ah;
-	                bl = al;
-	                al = (t1l + t2l) | 0;
-	                ah = (t1h + t2h + ((al >>> 0) < (t1l >>> 0) ? 1 : 0)) | 0;
-	            }
-
-	            // Intermediate hash value
-	            H0l = H0.low  = (H0l + al);
-	            H0.high = (H0h + ah + ((H0l >>> 0) < (al >>> 0) ? 1 : 0));
-	            H1l = H1.low  = (H1l + bl);
-	            H1.high = (H1h + bh + ((H1l >>> 0) < (bl >>> 0) ? 1 : 0));
-	            H2l = H2.low  = (H2l + cl);
-	            H2.high = (H2h + ch + ((H2l >>> 0) < (cl >>> 0) ? 1 : 0));
-	            H3l = H3.low  = (H3l + dl);
-	            H3.high = (H3h + dh + ((H3l >>> 0) < (dl >>> 0) ? 1 : 0));
-	            H4l = H4.low  = (H4l + el);
-	            H4.high = (H4h + eh + ((H4l >>> 0) < (el >>> 0) ? 1 : 0));
-	            H5l = H5.low  = (H5l + fl);
-	            H5.high = (H5h + fh + ((H5l >>> 0) < (fl >>> 0) ? 1 : 0));
-	            H6l = H6.low  = (H6l + gl);
-	            H6.high = (H6h + gh + ((H6l >>> 0) < (gl >>> 0) ? 1 : 0));
-	            H7l = H7.low  = (H7l + hl);
-	            H7.high = (H7h + hh + ((H7l >>> 0) < (hl >>> 0) ? 1 : 0));
-	        },
-
-	        _doFinalize: function () {
-	            // Shortcuts
-	            var data = this._data;
-	            var dataWords = data.words;
-
-	            var nBitsTotal = this._nDataBytes * 8;
-	            var nBitsLeft = data.sigBytes * 8;
-
-	            // Add padding
-	            dataWords[nBitsLeft >>> 5] |= 0x80 << (24 - nBitsLeft % 32);
-	            dataWords[(((nBitsLeft + 128) >>> 10) << 5) + 30] = Math.floor(nBitsTotal / 0x100000000);
-	            dataWords[(((nBitsLeft + 128) >>> 10) << 5) + 31] = nBitsTotal;
-	            data.sigBytes = dataWords.length * 4;
-
-	            // Hash final blocks
-	            this._process();
-
-	            // Convert hash to 32-bit word array before returning
-	            var hash = this._hash.toX32();
-
-	            // Return final computed hash
-	            return hash;
-	        },
-
-	        clone: function () {
-	            var clone = Hasher.clone.call(this);
-	            clone._hash = this._hash.clone();
-
-	            return clone;
-	        },
-
-	        blockSize: 1024/32
-	    });
-
-	    /**
-	     * Shortcut function to the hasher's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     *
-	     * @return {WordArray} The hash.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hash = CryptoJS.SHA512('message');
-	     *     var hash = CryptoJS.SHA512(wordArray);
-	     */
-	    C.SHA512 = Hasher._createHelper(SHA512);
-
-	    /**
-	     * Shortcut function to the HMAC's object interface.
-	     *
-	     * @param {WordArray|string} message The message to hash.
-	     * @param {WordArray|string} key The secret key.
-	     *
-	     * @return {WordArray} The HMAC.
-	     *
-	     * @static
-	     *
-	     * @example
-	     *
-	     *     var hmac = CryptoJS.HmacSHA512(message, key);
-	     */
-	    C.HmacSHA512 = Hasher._createHmacHelper(SHA512);
-	}());
-
-
-	return CryptoJS.SHA512;
-
-}));
-},{"./core":9,"./x64-core":40}],39:[function(require,module,exports){
-;(function (root, factory, undef) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"), require("./enc-base64"), require("./md5"), require("./evpkdf"), require("./cipher-core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core", "./enc-base64", "./md5", "./evpkdf", "./cipher-core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function () {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var WordArray = C_lib.WordArray;
-	    var BlockCipher = C_lib.BlockCipher;
-	    var C_algo = C.algo;
-
-	    // Permuted Choice 1 constants
-	    var PC1 = [
-	        57, 49, 41, 33, 25, 17, 9,  1,
-	        58, 50, 42, 34, 26, 18, 10, 2,
-	        59, 51, 43, 35, 27, 19, 11, 3,
-	        60, 52, 44, 36, 63, 55, 47, 39,
-	        31, 23, 15, 7,  62, 54, 46, 38,
-	        30, 22, 14, 6,  61, 53, 45, 37,
-	        29, 21, 13, 5,  28, 20, 12, 4
-	    ];
-
-	    // Permuted Choice 2 constants
-	    var PC2 = [
-	        14, 17, 11, 24, 1,  5,
-	        3,  28, 15, 6,  21, 10,
-	        23, 19, 12, 4,  26, 8,
-	        16, 7,  27, 20, 13, 2,
-	        41, 52, 31, 37, 47, 55,
-	        30, 40, 51, 45, 33, 48,
-	        44, 49, 39, 56, 34, 53,
-	        46, 42, 50, 36, 29, 32
-	    ];
-
-	    // Cumulative bit shift constants
-	    var BIT_SHIFTS = [1,  2,  4,  6,  8,  10, 12, 14, 15, 17, 19, 21, 23, 25, 27, 28];
-
-	    // SBOXes and round permutation constants
-	    var SBOX_P = [
-	        {
-	            0x0: 0x808200,
-	            0x10000000: 0x8000,
-	            0x20000000: 0x808002,
-	            0x30000000: 0x2,
-	            0x40000000: 0x200,
-	            0x50000000: 0x808202,
-	            0x60000000: 0x800202,
-	            0x70000000: 0x800000,
-	            0x80000000: 0x202,
-	            0x90000000: 0x800200,
-	            0xa0000000: 0x8200,
-	            0xb0000000: 0x808000,
-	            0xc0000000: 0x8002,
-	            0xd0000000: 0x800002,
-	            0xe0000000: 0x0,
-	            0xf0000000: 0x8202,
-	            0x8000000: 0x0,
-	            0x18000000: 0x808202,
-	            0x28000000: 0x8202,
-	            0x38000000: 0x8000,
-	            0x48000000: 0x808200,
-	            0x58000000: 0x200,
-	            0x68000000: 0x808002,
-	            0x78000000: 0x2,
-	            0x88000000: 0x800200,
-	            0x98000000: 0x8200,
-	            0xa8000000: 0x808000,
-	            0xb8000000: 0x800202,
-	            0xc8000000: 0x800002,
-	            0xd8000000: 0x8002,
-	            0xe8000000: 0x202,
-	            0xf8000000: 0x800000,
-	            0x1: 0x8000,
-	            0x10000001: 0x2,
-	            0x20000001: 0x808200,
-	            0x30000001: 0x800000,
-	            0x40000001: 0x808002,
-	            0x50000001: 0x8200,
-	            0x60000001: 0x200,
-	            0x70000001: 0x800202,
-	            0x80000001: 0x808202,
-	            0x90000001: 0x808000,
-	            0xa0000001: 0x800002,
-	            0xb0000001: 0x8202,
-	            0xc0000001: 0x202,
-	            0xd0000001: 0x800200,
-	            0xe0000001: 0x8002,
-	            0xf0000001: 0x0,
-	            0x8000001: 0x808202,
-	            0x18000001: 0x808000,
-	            0x28000001: 0x800000,
-	            0x38000001: 0x200,
-	            0x48000001: 0x8000,
-	            0x58000001: 0x800002,
-	            0x68000001: 0x2,
-	            0x78000001: 0x8202,
-	            0x88000001: 0x8002,
-	            0x98000001: 0x800202,
-	            0xa8000001: 0x202,
-	            0xb8000001: 0x808200,
-	            0xc8000001: 0x800200,
-	            0xd8000001: 0x0,
-	            0xe8000001: 0x8200,
-	            0xf8000001: 0x808002
-	        },
-	        {
-	            0x0: 0x40084010,
-	            0x1000000: 0x4000,
-	            0x2000000: 0x80000,
-	            0x3000000: 0x40080010,
-	            0x4000000: 0x40000010,
-	            0x5000000: 0x40084000,
-	            0x6000000: 0x40004000,
-	            0x7000000: 0x10,
-	            0x8000000: 0x84000,
-	            0x9000000: 0x40004010,
-	            0xa000000: 0x40000000,
-	            0xb000000: 0x84010,
-	            0xc000000: 0x80010,
-	            0xd000000: 0x0,
-	            0xe000000: 0x4010,
-	            0xf000000: 0x40080000,
-	            0x800000: 0x40004000,
-	            0x1800000: 0x84010,
-	            0x2800000: 0x10,
-	            0x3800000: 0x40004010,
-	            0x4800000: 0x40084010,
-	            0x5800000: 0x40000000,
-	            0x6800000: 0x80000,
-	            0x7800000: 0x40080010,
-	            0x8800000: 0x80010,
-	            0x9800000: 0x0,
-	            0xa800000: 0x4000,
-	            0xb800000: 0x40080000,
-	            0xc800000: 0x40000010,
-	            0xd800000: 0x84000,
-	            0xe800000: 0x40084000,
-	            0xf800000: 0x4010,
-	            0x10000000: 0x0,
-	            0x11000000: 0x40080010,
-	            0x12000000: 0x40004010,
-	            0x13000000: 0x40084000,
-	            0x14000000: 0x40080000,
-	            0x15000000: 0x10,
-	            0x16000000: 0x84010,
-	            0x17000000: 0x4000,
-	            0x18000000: 0x4010,
-	            0x19000000: 0x80000,
-	            0x1a000000: 0x80010,
-	            0x1b000000: 0x40000010,
-	            0x1c000000: 0x84000,
-	            0x1d000000: 0x40004000,
-	            0x1e000000: 0x40000000,
-	            0x1f000000: 0x40084010,
-	            0x10800000: 0x84010,
-	            0x11800000: 0x80000,
-	            0x12800000: 0x40080000,
-	            0x13800000: 0x4000,
-	            0x14800000: 0x40004000,
-	            0x15800000: 0x40084010,
-	            0x16800000: 0x10,
-	            0x17800000: 0x40000000,
-	            0x18800000: 0x40084000,
-	            0x19800000: 0x40000010,
-	            0x1a800000: 0x40004010,
-	            0x1b800000: 0x80010,
-	            0x1c800000: 0x0,
-	            0x1d800000: 0x4010,
-	            0x1e800000: 0x40080010,
-	            0x1f800000: 0x84000
-	        },
-	        {
-	            0x0: 0x104,
-	            0x100000: 0x0,
-	            0x200000: 0x4000100,
-	            0x300000: 0x10104,
-	            0x400000: 0x10004,
-	            0x500000: 0x4000004,
-	            0x600000: 0x4010104,
-	            0x700000: 0x4010000,
-	            0x800000: 0x4000000,
-	            0x900000: 0x4010100,
-	            0xa00000: 0x10100,
-	            0xb00000: 0x4010004,
-	            0xc00000: 0x4000104,
-	            0xd00000: 0x10000,
-	            0xe00000: 0x4,
-	            0xf00000: 0x100,
-	            0x80000: 0x4010100,
-	            0x180000: 0x4010004,
-	            0x280000: 0x0,
-	            0x380000: 0x4000100,
-	            0x480000: 0x4000004,
-	            0x580000: 0x10000,
-	            0x680000: 0x10004,
-	            0x780000: 0x104,
-	            0x880000: 0x4,
-	            0x980000: 0x100,
-	            0xa80000: 0x4010000,
-	            0xb80000: 0x10104,
-	            0xc80000: 0x10100,
-	            0xd80000: 0x4000104,
-	            0xe80000: 0x4010104,
-	            0xf80000: 0x4000000,
-	            0x1000000: 0x4010100,
-	            0x1100000: 0x10004,
-	            0x1200000: 0x10000,
-	            0x1300000: 0x4000100,
-	            0x1400000: 0x100,
-	            0x1500000: 0x4010104,
-	            0x1600000: 0x4000004,
-	            0x1700000: 0x0,
-	            0x1800000: 0x4000104,
-	            0x1900000: 0x4000000,
-	            0x1a00000: 0x4,
-	            0x1b00000: 0x10100,
-	            0x1c00000: 0x4010000,
-	            0x1d00000: 0x104,
-	            0x1e00000: 0x10104,
-	            0x1f00000: 0x4010004,
-	            0x1080000: 0x4000000,
-	            0x1180000: 0x104,
-	            0x1280000: 0x4010100,
-	            0x1380000: 0x0,
-	            0x1480000: 0x10004,
-	            0x1580000: 0x4000100,
-	            0x1680000: 0x100,
-	            0x1780000: 0x4010004,
-	            0x1880000: 0x10000,
-	            0x1980000: 0x4010104,
-	            0x1a80000: 0x10104,
-	            0x1b80000: 0x4000004,
-	            0x1c80000: 0x4000104,
-	            0x1d80000: 0x4010000,
-	            0x1e80000: 0x4,
-	            0x1f80000: 0x10100
-	        },
-	        {
-	            0x0: 0x80401000,
-	            0x10000: 0x80001040,
-	            0x20000: 0x401040,
-	            0x30000: 0x80400000,
-	            0x40000: 0x0,
-	            0x50000: 0x401000,
-	            0x60000: 0x80000040,
-	            0x70000: 0x400040,
-	            0x80000: 0x80000000,
-	            0x90000: 0x400000,
-	            0xa0000: 0x40,
-	            0xb0000: 0x80001000,
-	            0xc0000: 0x80400040,
-	            0xd0000: 0x1040,
-	            0xe0000: 0x1000,
-	            0xf0000: 0x80401040,
-	            0x8000: 0x80001040,
-	            0x18000: 0x40,
-	            0x28000: 0x80400040,
-	            0x38000: 0x80001000,
-	            0x48000: 0x401000,
-	            0x58000: 0x80401040,
-	            0x68000: 0x0,
-	            0x78000: 0x80400000,
-	            0x88000: 0x1000,
-	            0x98000: 0x80401000,
-	            0xa8000: 0x400000,
-	            0xb8000: 0x1040,
-	            0xc8000: 0x80000000,
-	            0xd8000: 0x400040,
-	            0xe8000: 0x401040,
-	            0xf8000: 0x80000040,
-	            0x100000: 0x400040,
-	            0x110000: 0x401000,
-	            0x120000: 0x80000040,
-	            0x130000: 0x0,
-	            0x140000: 0x1040,
-	            0x150000: 0x80400040,
-	            0x160000: 0x80401000,
-	            0x170000: 0x80001040,
-	            0x180000: 0x80401040,
-	            0x190000: 0x80000000,
-	            0x1a0000: 0x80400000,
-	            0x1b0000: 0x401040,
-	            0x1c0000: 0x80001000,
-	            0x1d0000: 0x400000,
-	            0x1e0000: 0x40,
-	            0x1f0000: 0x1000,
-	            0x108000: 0x80400000,
-	            0x118000: 0x80401040,
-	            0x128000: 0x0,
-	            0x138000: 0x401000,
-	            0x148000: 0x400040,
-	            0x158000: 0x80000000,
-	            0x168000: 0x80001040,
-	            0x178000: 0x40,
-	            0x188000: 0x80000040,
-	            0x198000: 0x1000,
-	            0x1a8000: 0x80001000,
-	            0x1b8000: 0x80400040,
-	            0x1c8000: 0x1040,
-	            0x1d8000: 0x80401000,
-	            0x1e8000: 0x400000,
-	            0x1f8000: 0x401040
-	        },
-	        {
-	            0x0: 0x80,
-	            0x1000: 0x1040000,
-	            0x2000: 0x40000,
-	            0x3000: 0x20000000,
-	            0x4000: 0x20040080,
-	            0x5000: 0x1000080,
-	            0x6000: 0x21000080,
-	            0x7000: 0x40080,
-	            0x8000: 0x1000000,
-	            0x9000: 0x20040000,
-	            0xa000: 0x20000080,
-	            0xb000: 0x21040080,
-	            0xc000: 0x21040000,
-	            0xd000: 0x0,
-	            0xe000: 0x1040080,
-	            0xf000: 0x21000000,
-	            0x800: 0x1040080,
-	            0x1800: 0x21000080,
-	            0x2800: 0x80,
-	            0x3800: 0x1040000,
-	            0x4800: 0x40000,
-	            0x5800: 0x20040080,
-	            0x6800: 0x21040000,
-	            0x7800: 0x20000000,
-	            0x8800: 0x20040000,
-	            0x9800: 0x0,
-	            0xa800: 0x21040080,
-	            0xb800: 0x1000080,
-	            0xc800: 0x20000080,
-	            0xd800: 0x21000000,
-	            0xe800: 0x1000000,
-	            0xf800: 0x40080,
-	            0x10000: 0x40000,
-	            0x11000: 0x80,
-	            0x12000: 0x20000000,
-	            0x13000: 0x21000080,
-	            0x14000: 0x1000080,
-	            0x15000: 0x21040000,
-	            0x16000: 0x20040080,
-	            0x17000: 0x1000000,
-	            0x18000: 0x21040080,
-	            0x19000: 0x21000000,
-	            0x1a000: 0x1040000,
-	            0x1b000: 0x20040000,
-	            0x1c000: 0x40080,
-	            0x1d000: 0x20000080,
-	            0x1e000: 0x0,
-	            0x1f000: 0x1040080,
-	            0x10800: 0x21000080,
-	            0x11800: 0x1000000,
-	            0x12800: 0x1040000,
-	            0x13800: 0x20040080,
-	            0x14800: 0x20000000,
-	            0x15800: 0x1040080,
-	            0x16800: 0x80,
-	            0x17800: 0x21040000,
-	            0x18800: 0x40080,
-	            0x19800: 0x21040080,
-	            0x1a800: 0x0,
-	            0x1b800: 0x21000000,
-	            0x1c800: 0x1000080,
-	            0x1d800: 0x40000,
-	            0x1e800: 0x20040000,
-	            0x1f800: 0x20000080
-	        },
-	        {
-	            0x0: 0x10000008,
-	            0x100: 0x2000,
-	            0x200: 0x10200000,
-	            0x300: 0x10202008,
-	            0x400: 0x10002000,
-	            0x500: 0x200000,
-	            0x600: 0x200008,
-	            0x700: 0x10000000,
-	            0x800: 0x0,
-	            0x900: 0x10002008,
-	            0xa00: 0x202000,
-	            0xb00: 0x8,
-	            0xc00: 0x10200008,
-	            0xd00: 0x202008,
-	            0xe00: 0x2008,
-	            0xf00: 0x10202000,
-	            0x80: 0x10200000,
-	            0x180: 0x10202008,
-	            0x280: 0x8,
-	            0x380: 0x200000,
-	            0x480: 0x202008,
-	            0x580: 0x10000008,
-	            0x680: 0x10002000,
-	            0x780: 0x2008,
-	            0x880: 0x200008,
-	            0x980: 0x2000,
-	            0xa80: 0x10002008,
-	            0xb80: 0x10200008,
-	            0xc80: 0x0,
-	            0xd80: 0x10202000,
-	            0xe80: 0x202000,
-	            0xf80: 0x10000000,
-	            0x1000: 0x10002000,
-	            0x1100: 0x10200008,
-	            0x1200: 0x10202008,
-	            0x1300: 0x2008,
-	            0x1400: 0x200000,
-	            0x1500: 0x10000000,
-	            0x1600: 0x10000008,
-	            0x1700: 0x202000,
-	            0x1800: 0x202008,
-	            0x1900: 0x0,
-	            0x1a00: 0x8,
-	            0x1b00: 0x10200000,
-	            0x1c00: 0x2000,
-	            0x1d00: 0x10002008,
-	            0x1e00: 0x10202000,
-	            0x1f00: 0x200008,
-	            0x1080: 0x8,
-	            0x1180: 0x202000,
-	            0x1280: 0x200000,
-	            0x1380: 0x10000008,
-	            0x1480: 0x10002000,
-	            0x1580: 0x2008,
-	            0x1680: 0x10202008,
-	            0x1780: 0x10200000,
-	            0x1880: 0x10202000,
-	            0x1980: 0x10200008,
-	            0x1a80: 0x2000,
-	            0x1b80: 0x202008,
-	            0x1c80: 0x200008,
-	            0x1d80: 0x0,
-	            0x1e80: 0x10000000,
-	            0x1f80: 0x10002008
-	        },
-	        {
-	            0x0: 0x100000,
-	            0x10: 0x2000401,
-	            0x20: 0x400,
-	            0x30: 0x100401,
-	            0x40: 0x2100401,
-	            0x50: 0x0,
-	            0x60: 0x1,
-	            0x70: 0x2100001,
-	            0x80: 0x2000400,
-	            0x90: 0x100001,
-	            0xa0: 0x2000001,
-	            0xb0: 0x2100400,
-	            0xc0: 0x2100000,
-	            0xd0: 0x401,
-	            0xe0: 0x100400,
-	            0xf0: 0x2000000,
-	            0x8: 0x2100001,
-	            0x18: 0x0,
-	            0x28: 0x2000401,
-	            0x38: 0x2100400,
-	            0x48: 0x100000,
-	            0x58: 0x2000001,
-	            0x68: 0x2000000,
-	            0x78: 0x401,
-	            0x88: 0x100401,
-	            0x98: 0x2000400,
-	            0xa8: 0x2100000,
-	            0xb8: 0x100001,
-	            0xc8: 0x400,
-	            0xd8: 0x2100401,
-	            0xe8: 0x1,
-	            0xf8: 0x100400,
-	            0x100: 0x2000000,
-	            0x110: 0x100000,
-	            0x120: 0x2000401,
-	            0x130: 0x2100001,
-	            0x140: 0x100001,
-	            0x150: 0x2000400,
-	            0x160: 0x2100400,
-	            0x170: 0x100401,
-	            0x180: 0x401,
-	            0x190: 0x2100401,
-	            0x1a0: 0x100400,
-	            0x1b0: 0x1,
-	            0x1c0: 0x0,
-	            0x1d0: 0x2100000,
-	            0x1e0: 0x2000001,
-	            0x1f0: 0x400,
-	            0x108: 0x100400,
-	            0x118: 0x2000401,
-	            0x128: 0x2100001,
-	            0x138: 0x1,
-	            0x148: 0x2000000,
-	            0x158: 0x100000,
-	            0x168: 0x401,
-	            0x178: 0x2100400,
-	            0x188: 0x2000001,
-	            0x198: 0x2100000,
-	            0x1a8: 0x0,
-	            0x1b8: 0x2100401,
-	            0x1c8: 0x100401,
-	            0x1d8: 0x400,
-	            0x1e8: 0x2000400,
-	            0x1f8: 0x100001
-	        },
-	        {
-	            0x0: 0x8000820,
-	            0x1: 0x20000,
-	            0x2: 0x8000000,
-	            0x3: 0x20,
-	            0x4: 0x20020,
-	            0x5: 0x8020820,
-	            0x6: 0x8020800,
-	            0x7: 0x800,
-	            0x8: 0x8020000,
-	            0x9: 0x8000800,
-	            0xa: 0x20800,
-	            0xb: 0x8020020,
-	            0xc: 0x820,
-	            0xd: 0x0,
-	            0xe: 0x8000020,
-	            0xf: 0x20820,
-	            0x80000000: 0x800,
-	            0x80000001: 0x8020820,
-	            0x80000002: 0x8000820,
-	            0x80000003: 0x8000000,
-	            0x80000004: 0x8020000,
-	            0x80000005: 0x20800,
-	            0x80000006: 0x20820,
-	            0x80000007: 0x20,
-	            0x80000008: 0x8000020,
-	            0x80000009: 0x820,
-	            0x8000000a: 0x20020,
-	            0x8000000b: 0x8020800,
-	            0x8000000c: 0x0,
-	            0x8000000d: 0x8020020,
-	            0x8000000e: 0x8000800,
-	            0x8000000f: 0x20000,
-	            0x10: 0x20820,
-	            0x11: 0x8020800,
-	            0x12: 0x20,
-	            0x13: 0x800,
-	            0x14: 0x8000800,
-	            0x15: 0x8000020,
-	            0x16: 0x8020020,
-	            0x17: 0x20000,
-	            0x18: 0x0,
-	            0x19: 0x20020,
-	            0x1a: 0x8020000,
-	            0x1b: 0x8000820,
-	            0x1c: 0x8020820,
-	            0x1d: 0x20800,
-	            0x1e: 0x820,
-	            0x1f: 0x8000000,
-	            0x80000010: 0x20000,
-	            0x80000011: 0x800,
-	            0x80000012: 0x8020020,
-	            0x80000013: 0x20820,
-	            0x80000014: 0x20,
-	            0x80000015: 0x8020000,
-	            0x80000016: 0x8000000,
-	            0x80000017: 0x8000820,
-	            0x80000018: 0x8020820,
-	            0x80000019: 0x8000020,
-	            0x8000001a: 0x8000800,
-	            0x8000001b: 0x0,
-	            0x8000001c: 0x20800,
-	            0x8000001d: 0x820,
-	            0x8000001e: 0x20020,
-	            0x8000001f: 0x8020800
-	        }
-	    ];
-
-	    // Masks that select the SBOX input
-	    var SBOX_MASK = [
-	        0xf8000001, 0x1f800000, 0x01f80000, 0x001f8000,
-	        0x0001f800, 0x00001f80, 0x000001f8, 0x8000001f
-	    ];
-
-	    /**
-	     * DES block cipher algorithm.
-	     */
-	    var DES = C_algo.DES = BlockCipher.extend({
-	        _doReset: function () {
-	            // Shortcuts
-	            var key = this._key;
-	            var keyWords = key.words;
-
-	            // Select 56 bits according to PC1
-	            var keyBits = [];
-	            for (var i = 0; i < 56; i++) {
-	                var keyBitPos = PC1[i] - 1;
-	                keyBits[i] = (keyWords[keyBitPos >>> 5] >>> (31 - keyBitPos % 32)) & 1;
-	            }
-
-	            // Assemble 16 subkeys
-	            var subKeys = this._subKeys = [];
-	            for (var nSubKey = 0; nSubKey < 16; nSubKey++) {
-	                // Create subkey
-	                var subKey = subKeys[nSubKey] = [];
-
-	                // Shortcut
-	                var bitShift = BIT_SHIFTS[nSubKey];
-
-	                // Select 48 bits according to PC2
-	                for (var i = 0; i < 24; i++) {
-	                    // Select from the left 28 key bits
-	                    subKey[(i / 6) | 0] |= keyBits[((PC2[i] - 1) + bitShift) % 28] << (31 - i % 6);
-
-	                    // Select from the right 28 key bits
-	                    subKey[4 + ((i / 6) | 0)] |= keyBits[28 + (((PC2[i + 24] - 1) + bitShift) % 28)] << (31 - i % 6);
-	                }
-
-	                // Since each subkey is applied to an expanded 32-bit input,
-	                // the subkey can be broken into 8 values scaled to 32-bits,
-	                // which allows the key to be used without expansion
-	                subKey[0] = (subKey[0] << 1) | (subKey[0] >>> 31);
-	                for (var i = 1; i < 7; i++) {
-	                    subKey[i] = subKey[i] >>> ((i - 1) * 4 + 3);
-	                }
-	                subKey[7] = (subKey[7] << 5) | (subKey[7] >>> 27);
-	            }
-
-	            // Compute inverse subkeys
-	            var invSubKeys = this._invSubKeys = [];
-	            for (var i = 0; i < 16; i++) {
-	                invSubKeys[i] = subKeys[15 - i];
-	            }
-	        },
-
-	        encryptBlock: function (M, offset) {
-	            this._doCryptBlock(M, offset, this._subKeys);
-	        },
-
-	        decryptBlock: function (M, offset) {
-	            this._doCryptBlock(M, offset, this._invSubKeys);
-	        },
-
-	        _doCryptBlock: function (M, offset, subKeys) {
-	            // Get input
-	            this._lBlock = M[offset];
-	            this._rBlock = M[offset + 1];
-
-	            // Initial permutation
-	            exchangeLR.call(this, 4,  0x0f0f0f0f);
-	            exchangeLR.call(this, 16, 0x0000ffff);
-	            exchangeRL.call(this, 2,  0x33333333);
-	            exchangeRL.call(this, 8,  0x00ff00ff);
-	            exchangeLR.call(this, 1,  0x55555555);
-
-	            // Rounds
-	            for (var round = 0; round < 16; round++) {
-	                // Shortcuts
-	                var subKey = subKeys[round];
-	                var lBlock = this._lBlock;
-	                var rBlock = this._rBlock;
-
-	                // Feistel function
-	                var f = 0;
-	                for (var i = 0; i < 8; i++) {
-	                    f |= SBOX_P[i][((rBlock ^ subKey[i]) & SBOX_MASK[i]) >>> 0];
-	                }
-	                this._lBlock = rBlock;
-	                this._rBlock = lBlock ^ f;
-	            }
-
-	            // Undo swap from last round
-	            var t = this._lBlock;
-	            this._lBlock = this._rBlock;
-	            this._rBlock = t;
-
-	            // Final permutation
-	            exchangeLR.call(this, 1,  0x55555555);
-	            exchangeRL.call(this, 8,  0x00ff00ff);
-	            exchangeRL.call(this, 2,  0x33333333);
-	            exchangeLR.call(this, 16, 0x0000ffff);
-	            exchangeLR.call(this, 4,  0x0f0f0f0f);
-
-	            // Set output
-	            M[offset] = this._lBlock;
-	            M[offset + 1] = this._rBlock;
-	        },
-
-	        keySize: 64/32,
-
-	        ivSize: 64/32,
-
-	        blockSize: 64/32
-	    });
-
-	    // Swap bits across the left and right words
-	    function exchangeLR(offset, mask) {
-	        var t = ((this._lBlock >>> offset) ^ this._rBlock) & mask;
-	        this._rBlock ^= t;
-	        this._lBlock ^= t << offset;
-	    }
-
-	    function exchangeRL(offset, mask) {
-	        var t = ((this._rBlock >>> offset) ^ this._lBlock) & mask;
-	        this._lBlock ^= t;
-	        this._rBlock ^= t << offset;
-	    }
-
-	    /**
-	     * Shortcut functions to the cipher's object interface.
-	     *
-	     * @example
-	     *
-	     *     var ciphertext = CryptoJS.DES.encrypt(message, key, cfg);
-	     *     var plaintext  = CryptoJS.DES.decrypt(ciphertext, key, cfg);
-	     */
-	    C.DES = BlockCipher._createHelper(DES);
-
-	    /**
-	     * Triple-DES block cipher algorithm.
-	     */
-	    var TripleDES = C_algo.TripleDES = BlockCipher.extend({
-	        _doReset: function () {
-	            // Shortcuts
-	            var key = this._key;
-	            var keyWords = key.words;
-
-	            // Create DES instances
-	            this._des1 = DES.createEncryptor(WordArray.create(keyWords.slice(0, 2)));
-	            this._des2 = DES.createEncryptor(WordArray.create(keyWords.slice(2, 4)));
-	            this._des3 = DES.createEncryptor(WordArray.create(keyWords.slice(4, 6)));
-	        },
-
-	        encryptBlock: function (M, offset) {
-	            this._des1.encryptBlock(M, offset);
-	            this._des2.decryptBlock(M, offset);
-	            this._des3.encryptBlock(M, offset);
-	        },
-
-	        decryptBlock: function (M, offset) {
-	            this._des3.decryptBlock(M, offset);
-	            this._des2.encryptBlock(M, offset);
-	            this._des1.decryptBlock(M, offset);
-	        },
-
-	        keySize: 192/32,
-
-	        ivSize: 64/32,
-
-	        blockSize: 64/32
-	    });
-
-	    /**
-	     * Shortcut functions to the cipher's object interface.
-	     *
-	     * @example
-	     *
-	     *     var ciphertext = CryptoJS.TripleDES.encrypt(message, key, cfg);
-	     *     var plaintext  = CryptoJS.TripleDES.decrypt(ciphertext, key, cfg);
-	     */
-	    C.TripleDES = BlockCipher._createHelper(TripleDES);
-	}());
-
-
-	return CryptoJS.TripleDES;
-
-}));
-},{"./cipher-core":8,"./core":9,"./enc-base64":10,"./evpkdf":12,"./md5":17}],40:[function(require,module,exports){
-;(function (root, factory) {
-	if (typeof exports === "object") {
-		// CommonJS
-		module.exports = exports = factory(require("./core"));
-	}
-	else if (typeof define === "function" && define.amd) {
-		// AMD
-		define(["./core"], factory);
-	}
-	else {
-		// Global (browser)
-		factory(root.CryptoJS);
-	}
-}(this, function (CryptoJS) {
-
-	(function (undefined) {
-	    // Shortcuts
-	    var C = CryptoJS;
-	    var C_lib = C.lib;
-	    var Base = C_lib.Base;
-	    var X32WordArray = C_lib.WordArray;
-
-	    /**
-	     * x64 namespace.
-	     */
-	    var C_x64 = C.x64 = {};
-
-	    /**
-	     * A 64-bit word.
-	     */
-	    var X64Word = C_x64.Word = Base.extend({
-	        /**
-	         * Initializes a newly created 64-bit word.
-	         *
-	         * @param {number} high The high 32 bits.
-	         * @param {number} low The low 32 bits.
-	         *
-	         * @example
-	         *
-	         *     var x64Word = CryptoJS.x64.Word.create(0x00010203, 0x04050607);
-	         */
-	        init: function (high, low) {
-	            this.high = high;
-	            this.low = low;
-	        }
-
-	        /**
-	         * Bitwise NOTs this word.
-	         *
-	         * @return {X64Word} A new x64-Word object after negating.
-	         *
-	         * @example
-	         *
-	         *     var negated = x64Word.not();
-	         */
-	        // not: function () {
-	            // var high = ~this.high;
-	            // var low = ~this.low;
-
-	            // return X64Word.create(high, low);
-	        // },
-
-	        /**
-	         * Bitwise ANDs this word with the passed word.
-	         *
-	         * @param {X64Word} word The x64-Word to AND with this word.
-	         *
-	         * @return {X64Word} A new x64-Word object after ANDing.
-	         *
-	         * @example
-	         *
-	         *     var anded = x64Word.and(anotherX64Word);
-	         */
-	        // and: function (word) {
-	            // var high = this.high & word.high;
-	            // var low = this.low & word.low;
-
-	            // return X64Word.create(high, low);
-	        // },
-
-	        /**
-	         * Bitwise ORs this word with the passed word.
-	         *
-	         * @param {X64Word} word The x64-Word to OR with this word.
-	         *
-	         * @return {X64Word} A new x64-Word object after ORing.
-	         *
-	         * @example
-	         *
-	         *     var ored = x64Word.or(anotherX64Word);
-	         */
-	        // or: function (word) {
-	            // var high = this.high | word.high;
-	            // var low = this.low | word.low;
-
-	            // return X64Word.create(high, low);
-	        // },
-
-	        /**
-	         * Bitwise XORs this word with the passed word.
-	         *
-	         * @param {X64Word} word The x64-Word to XOR with this word.
-	         *
-	         * @return {X64Word} A new x64-Word object after XORing.
-	         *
-	         * @example
-	         *
-	         *     var xored = x64Word.xor(anotherX64Word);
-	         */
-	        // xor: function (word) {
-	            // var high = this.high ^ word.high;
-	            // var low = this.low ^ word.low;
-
-	            // return X64Word.create(high, low);
-	        // },
-
-	        /**
-	         * Shifts this word n bits to the left.
-	         *
-	         * @param {number} n The number of bits to shift.
-	         *
-	         * @return {X64Word} A new x64-Word object after shifting.
-	         *
-	         * @example
-	         *
-	         *     var shifted = x64Word.shiftL(25);
-	         */
-	        // shiftL: function (n) {
-	            // if (n < 32) {
-	                // var high = (this.high << n) | (this.low >>> (32 - n));
-	                // var low = this.low << n;
-	            // } else {
-	                // var high = this.low << (n - 32);
-	                // var low = 0;
-	            // }
-
-	            // return X64Word.create(high, low);
-	        // },
-
-	        /**
-	         * Shifts this word n bits to the right.
-	         *
-	         * @param {number} n The number of bits to shift.
-	         *
-	         * @return {X64Word} A new x64-Word object after shifting.
-	         *
-	         * @example
-	         *
-	         *     var shifted = x64Word.shiftR(7);
-	         */
-	        // shiftR: function (n) {
-	            // if (n < 32) {
-	                // var low = (this.low >>> n) | (this.high << (32 - n));
-	                // var high = this.high >>> n;
-	            // } else {
-	                // var low = this.high >>> (n - 32);
-	                // var high = 0;
-	            // }
-
-	            // return X64Word.create(high, low);
-	        // },
-
-	        /**
-	         * Rotates this word n bits to the left.
-	         *
-	         * @param {number} n The number of bits to rotate.
-	         *
-	         * @return {X64Word} A new x64-Word object after rotating.
-	         *
-	         * @example
-	         *
-	         *     var rotated = x64Word.rotL(25);
-	         */
-	        // rotL: function (n) {
-	            // return this.shiftL(n).or(this.shiftR(64 - n));
-	        // },
-
-	        /**
-	         * Rotates this word n bits to the right.
-	         *
-	         * @param {number} n The number of bits to rotate.
-	         *
-	         * @return {X64Word} A new x64-Word object after rotating.
-	         *
-	         * @example
-	         *
-	         *     var rotated = x64Word.rotR(7);
-	         */
-	        // rotR: function (n) {
-	            // return this.shiftR(n).or(this.shiftL(64 - n));
-	        // },
-
-	        /**
-	         * Adds this word with the passed word.
-	         *
-	         * @param {X64Word} word The x64-Word to add with this word.
-	         *
-	         * @return {X64Word} A new x64-Word object after adding.
-	         *
-	         * @example
-	         *
-	         *     var added = x64Word.add(anotherX64Word);
-	         */
-	        // add: function (word) {
-	            // var low = (this.low + word.low) | 0;
-	            // var carry = (low >>> 0) < (this.low >>> 0) ? 1 : 0;
-	            // var high = (this.high + word.high + carry) | 0;
-
-	            // return X64Word.create(high, low);
-	        // }
-	    });
-
-	    /**
-	     * An array of 64-bit words.
-	     *
-	     * @property {Array} words The array of CryptoJS.x64.Word objects.
-	     * @property {number} sigBytes The number of significant bytes in this word array.
-	     */
-	    var X64WordArray = C_x64.WordArray = Base.extend({
-	        /**
-	         * Initializes a newly created word array.
-	         *
-	         * @param {Array} words (Optional) An array of CryptoJS.x64.Word objects.
-	         * @param {number} sigBytes (Optional) The number of significant bytes in the words.
-	         *
-	         * @example
-	         *
-	         *     var wordArray = CryptoJS.x64.WordArray.create();
-	         *
-	         *     var wordArray = CryptoJS.x64.WordArray.create([
-	         *         CryptoJS.x64.Word.create(0x00010203, 0x04050607),
-	         *         CryptoJS.x64.Word.create(0x18191a1b, 0x1c1d1e1f)
-	         *     ]);
-	         *
-	         *     var wordArray = CryptoJS.x64.WordArray.create([
-	         *         CryptoJS.x64.Word.create(0x00010203, 0x04050607),
-	         *         CryptoJS.x64.Word.create(0x18191a1b, 0x1c1d1e1f)
-	         *     ], 10);
-	         */
-	        init: function (words, sigBytes) {
-	            words = this.words = words || [];
-
-	            if (sigBytes != undefined) {
-	                this.sigBytes = sigBytes;
-	            } else {
-	                this.sigBytes = words.length * 8;
-	            }
-	        },
-
-	        /**
-	         * Converts this 64-bit word array to a 32-bit word array.
-	         *
-	         * @return {CryptoJS.lib.WordArray} This word array's data as a 32-bit word array.
-	         *
-	         * @example
-	         *
-	         *     var x32WordArray = x64WordArray.toX32();
-	         */
-	        toX32: function () {
-	            // Shortcuts
-	            var x64Words = this.words;
-	            var x64WordsLength = x64Words.length;
-
-	            // Convert
-	            var x32Words = [];
-	            for (var i = 0; i < x64WordsLength; i++) {
-	                var x64Word = x64Words[i];
-	                x32Words.push(x64Word.high);
-	                x32Words.push(x64Word.low);
-	            }
-
-	            return X32WordArray.create(x32Words, this.sigBytes);
-	        },
-
-	        /**
-	         * Creates a copy of this word array.
-	         *
-	         * @return {X64WordArray} The clone.
-	         *
-	         * @example
-	         *
-	         *     var clone = x64WordArray.clone();
-	         */
-	        clone: function () {
-	            var clone = Base.clone.call(this);
-
-	            // Clone "words" array
-	            var words = clone.words = this.words.slice(0);
-
-	            // Clone each X64Word object
-	            var wordsLength = words.length;
-	            for (var i = 0; i < wordsLength; i++) {
-	                words[i] = words[i].clone();
-	            }
-
-	            return clone;
-	        }
-	    });
-	}());
-
-
-	return CryptoJS;
-
-}));
-},{"./core":9}],41:[function(require,module,exports){
+},{"./core":7}],12:[function(require,module,exports){
 (function (process,Buffer){
 var stream = require('readable-stream')
 var eos = require('end-of-stream')
@@ -8729,7 +3281,7 @@ Duplexify.prototype.end = function(data, enc, cb) {
 module.exports = Duplexify
 
 }).call(this,require('_process'),require("buffer").Buffer)
-},{"_process":69,"buffer":4,"end-of-stream":42,"inherits":52,"readable-stream":48}],42:[function(require,module,exports){
+},{"_process":41,"buffer":4,"end-of-stream":13,"inherits":24,"readable-stream":20}],13:[function(require,module,exports){
 var once = require('once');
 
 var noop = function() {};
@@ -8802,7 +3354,9 @@ var eos = function(stream, opts, callback) {
 };
 
 module.exports = eos;
-},{"once":67}],43:[function(require,module,exports){
+},{"once":39}],14:[function(require,module,exports){
+arguments[4][5][0].apply(exports,arguments)
+},{"dup":5}],15:[function(require,module,exports){
 // a duplex stream is just a stream that is both readable and writable.
 // Since JS doesn't have multiple prototypal inheritance, this class
 // prototypally inherits from Readable, and then parasitically from
@@ -8811,21 +3365,20 @@ module.exports = eos;
 'use strict';
 
 /*<replacement>*/
+
 var objectKeys = Object.keys || function (obj) {
   var keys = [];
-  for (var key in obj) keys.push(key);
-  return keys;
-}
+  for (var key in obj) {
+    keys.push(key);
+  }return keys;
+};
 /*</replacement>*/
-
 
 module.exports = Duplex;
 
 /*<replacement>*/
 var processNextTick = require('process-nextick-args');
 /*</replacement>*/
-
-
 
 /*<replacement>*/
 var util = require('core-util-is');
@@ -8840,26 +3393,21 @@ util.inherits(Duplex, Readable);
 var keys = objectKeys(Writable.prototype);
 for (var v = 0; v < keys.length; v++) {
   var method = keys[v];
-  if (!Duplex.prototype[method])
-    Duplex.prototype[method] = Writable.prototype[method];
+  if (!Duplex.prototype[method]) Duplex.prototype[method] = Writable.prototype[method];
 }
 
 function Duplex(options) {
-  if (!(this instanceof Duplex))
-    return new Duplex(options);
+  if (!(this instanceof Duplex)) return new Duplex(options);
 
   Readable.call(this, options);
   Writable.call(this, options);
 
-  if (options && options.readable === false)
-    this.readable = false;
+  if (options && options.readable === false) this.readable = false;
 
-  if (options && options.writable === false)
-    this.writable = false;
+  if (options && options.writable === false) this.writable = false;
 
   this.allowHalfOpen = true;
-  if (options && options.allowHalfOpen === false)
-    this.allowHalfOpen = false;
+  if (options && options.allowHalfOpen === false) this.allowHalfOpen = false;
 
   this.once('end', onend);
 }
@@ -8868,8 +3416,7 @@ function Duplex(options) {
 function onend() {
   // if we allow half-open state, or if the writable side ended,
   // then we're ok.
-  if (this.allowHalfOpen || this._writableState.ended)
-    return;
+  if (this.allowHalfOpen || this._writableState.ended) return;
 
   // no more data can be written.
   // But allow more writes to happen in this tick.
@@ -8880,13 +3427,12 @@ function onEndNT(self) {
   self.end();
 }
 
-function forEach (xs, f) {
+function forEach(xs, f) {
   for (var i = 0, l = xs.length; i < l; i++) {
     f(xs[i], i);
   }
 }
-
-},{"./_stream_readable":45,"./_stream_writable":47,"core-util-is":6,"inherits":52,"process-nextick-args":68}],44:[function(require,module,exports){
+},{"./_stream_readable":17,"./_stream_writable":19,"core-util-is":6,"inherits":24,"process-nextick-args":40}],16:[function(require,module,exports){
 // a passthrough stream.
 // basically just the most minimal sort of Transform stream.
 // Every written chunk gets output as-is.
@@ -8905,17 +3451,15 @@ util.inherits = require('inherits');
 util.inherits(PassThrough, Transform);
 
 function PassThrough(options) {
-  if (!(this instanceof PassThrough))
-    return new PassThrough(options);
+  if (!(this instanceof PassThrough)) return new PassThrough(options);
 
   Transform.call(this, options);
 }
 
-PassThrough.prototype._transform = function(chunk, encoding, cb) {
+PassThrough.prototype._transform = function (chunk, encoding, cb) {
   cb(null, chunk);
 };
-
-},{"./_stream_transform":46,"core-util-is":6,"inherits":52}],45:[function(require,module,exports){
+},{"./_stream_transform":18,"core-util-is":6,"inherits":24}],17:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -8925,11 +3469,9 @@ module.exports = Readable;
 var processNextTick = require('process-nextick-args');
 /*</replacement>*/
 
-
 /*<replacement>*/
 var isArray = require('isarray');
 /*</replacement>*/
-
 
 /*<replacement>*/
 var Buffer = require('buffer').Buffer;
@@ -8940,21 +3482,20 @@ Readable.ReadableState = ReadableState;
 var EE = require('events');
 
 /*<replacement>*/
-var EElistenerCount = function(emitter, type) {
+var EElistenerCount = function (emitter, type) {
   return emitter.listeners(type).length;
 };
 /*</replacement>*/
 
-
-
 /*<replacement>*/
 var Stream;
-(function (){try{
-  Stream = require('st' + 'ream');
-}catch(_){}finally{
-  if (!Stream)
-    Stream = require('events').EventEmitter;
-}}())
+(function () {
+  try {
+    Stream = require('st' + 'ream');
+  } catch (_) {} finally {
+    if (!Stream) Stream = require('events').EventEmitter;
+  }
+})();
 /*</replacement>*/
 
 var Buffer = require('buffer').Buffer;
@@ -8964,11 +3505,9 @@ var util = require('core-util-is');
 util.inherits = require('inherits');
 /*</replacement>*/
 
-
-
 /*<replacement>*/
 var debugUtil = require('util');
-var debug;
+var debug = undefined;
 if (debugUtil && debugUtil.debuglog) {
   debug = debugUtil.debuglog('stream');
 } else {
@@ -8990,17 +3529,16 @@ function ReadableState(options, stream) {
   // make all the buffer merging and length checks go away
   this.objectMode = !!options.objectMode;
 
-  if (stream instanceof Duplex)
-    this.objectMode = this.objectMode || !!options.readableObjectMode;
+  if (stream instanceof Duplex) this.objectMode = this.objectMode || !!options.readableObjectMode;
 
   // the point at which it stops calling _read() to fill the buffer
   // Note: 0 is a valid value, means "don't call _read preemptively ever"
   var hwm = options.highWaterMark;
   var defaultHwm = this.objectMode ? 16 : 16 * 1024;
-  this.highWaterMark = (hwm || hwm === 0) ? hwm : defaultHwm;
+  this.highWaterMark = hwm || hwm === 0 ? hwm : defaultHwm;
 
   // cast to ints.
-  this.highWaterMark = ~~this.highWaterMark;
+  this.highWaterMark = ~ ~this.highWaterMark;
 
   this.buffer = [];
   this.length = 0;
@@ -9022,6 +3560,7 @@ function ReadableState(options, stream) {
   this.needReadable = false;
   this.emittedReadable = false;
   this.readableListening = false;
+  this.resumeScheduled = false;
 
   // Crypto is kind of old and crusty.  Historically, its default string
   // encoding is 'binary' so we have to make this configurable.
@@ -9041,8 +3580,7 @@ function ReadableState(options, stream) {
   this.decoder = null;
   this.encoding = null;
   if (options.encoding) {
-    if (!StringDecoder)
-      StringDecoder = require('string_decoder/').StringDecoder;
+    if (!StringDecoder) StringDecoder = require('string_decoder/').StringDecoder;
     this.decoder = new StringDecoder(options.encoding);
     this.encoding = options.encoding;
   }
@@ -9052,16 +3590,14 @@ var Duplex;
 function Readable(options) {
   Duplex = Duplex || require('./_stream_duplex');
 
-  if (!(this instanceof Readable))
-    return new Readable(options);
+  if (!(this instanceof Readable)) return new Readable(options);
 
   this._readableState = new ReadableState(options, this);
 
   // legacy
   this.readable = true;
 
-  if (options && typeof options.read === 'function')
-    this._read = options.read;
+  if (options && typeof options.read === 'function') this._read = options.read;
 
   Stream.call(this);
 }
@@ -9070,7 +3606,7 @@ function Readable(options) {
 // This returns true if the highWaterMark has not been hit yet,
 // similar to how Writable.write() returns true if you should
 // write() some more.
-Readable.prototype.push = function(chunk, encoding) {
+Readable.prototype.push = function (chunk, encoding) {
   var state = this._readableState;
 
   if (!state.objectMode && typeof chunk === 'string') {
@@ -9085,12 +3621,12 @@ Readable.prototype.push = function(chunk, encoding) {
 };
 
 // Unshift should *always* be something directly out of read()
-Readable.prototype.unshift = function(chunk) {
+Readable.prototype.unshift = function (chunk) {
   var state = this._readableState;
   return readableAddChunk(this, state, chunk, '', true);
 };
 
-Readable.prototype.isPaused = function() {
+Readable.prototype.isPaused = function () {
   return this._readableState.flowing === false;
 };
 
@@ -9109,26 +3645,28 @@ function readableAddChunk(stream, state, chunk, encoding, addToFront) {
       var e = new Error('stream.unshift() after end event');
       stream.emit('error', e);
     } else {
-      if (state.decoder && !addToFront && !encoding)
+      var skipAdd;
+      if (state.decoder && !addToFront && !encoding) {
         chunk = state.decoder.write(chunk);
+        skipAdd = !state.objectMode && chunk.length === 0;
+      }
 
-      if (!addToFront)
-        state.reading = false;
+      if (!addToFront) state.reading = false;
 
-      // if we want the data now, just emit it.
-      if (state.flowing && state.length === 0 && !state.sync) {
-        stream.emit('data', chunk);
-        stream.read(0);
-      } else {
-        // update the buffer info.
-        state.length += state.objectMode ? 1 : chunk.length;
-        if (addToFront)
-          state.buffer.unshift(chunk);
-        else
-          state.buffer.push(chunk);
+      // Don't add to the buffer if we've decoded to an empty string chunk and
+      // we're not in object mode
+      if (!skipAdd) {
+        // if we want the data now, just emit it.
+        if (state.flowing && state.length === 0 && !state.sync) {
+          stream.emit('data', chunk);
+          stream.read(0);
+        } else {
+          // update the buffer info.
+          state.length += state.objectMode ? 1 : chunk.length;
+          if (addToFront) state.buffer.unshift(chunk);else state.buffer.push(chunk);
 
-        if (state.needReadable)
-          emitReadable(stream);
+          if (state.needReadable) emitReadable(stream);
+        }
       }
 
       maybeReadMore(stream, state);
@@ -9140,7 +3678,6 @@ function readableAddChunk(stream, state, chunk, encoding, addToFront) {
   return needMoreData(state);
 }
 
-
 // if it's past the high water mark, we can push in some more.
 // Also, if we have no data yet, we can stand some
 // more bytes.  This is to work around cases where hwm=0,
@@ -9149,16 +3686,12 @@ function readableAddChunk(stream, state, chunk, encoding, addToFront) {
 // needReadable was set, then we ought to push more, so that another
 // 'readable' event will be triggered.
 function needMoreData(state) {
-  return !state.ended &&
-         (state.needReadable ||
-          state.length < state.highWaterMark ||
-          state.length === 0);
+  return !state.ended && (state.needReadable || state.length < state.highWaterMark || state.length === 0);
 }
 
 // backwards compatibility.
-Readable.prototype.setEncoding = function(enc) {
-  if (!StringDecoder)
-    StringDecoder = require('string_decoder/').StringDecoder;
+Readable.prototype.setEncoding = function (enc) {
+  if (!StringDecoder) StringDecoder = require('string_decoder/').StringDecoder;
   this._readableState.decoder = new StringDecoder(enc);
   this._readableState.encoding = enc;
   return this;
@@ -9183,29 +3716,22 @@ function computeNewHighWaterMark(n) {
 }
 
 function howMuchToRead(n, state) {
-  if (state.length === 0 && state.ended)
-    return 0;
+  if (state.length === 0 && state.ended) return 0;
 
-  if (state.objectMode)
-    return n === 0 ? 0 : 1;
+  if (state.objectMode) return n === 0 ? 0 : 1;
 
   if (n === null || isNaN(n)) {
     // only flow one buffer at a time
-    if (state.flowing && state.buffer.length)
-      return state.buffer[0].length;
-    else
-      return state.length;
+    if (state.flowing && state.buffer.length) return state.buffer[0].length;else return state.length;
   }
 
-  if (n <= 0)
-    return 0;
+  if (n <= 0) return 0;
 
   // If we're asking for more than the target buffer level,
   // then raise the water mark.  Bump up to the next highest
   // power of 2, to prevent increasing it excessively in tiny
   // amounts.
-  if (n > state.highWaterMark)
-    state.highWaterMark = computeNewHighWaterMark(n);
+  if (n > state.highWaterMark) state.highWaterMark = computeNewHighWaterMark(n);
 
   // don't have that much.  return null, unless we've ended.
   if (n > state.length) {
@@ -9221,25 +3747,19 @@ function howMuchToRead(n, state) {
 }
 
 // you can override either this method, or the async _read(n) below.
-Readable.prototype.read = function(n) {
+Readable.prototype.read = function (n) {
   debug('read', n);
   var state = this._readableState;
   var nOrig = n;
 
-  if (typeof n !== 'number' || n > 0)
-    state.emittedReadable = false;
+  if (typeof n !== 'number' || n > 0) state.emittedReadable = false;
 
   // if we're doing read(0) to trigger a readable event, but we
   // already have a bunch of data in the buffer, then just trigger
   // the 'readable' event and move on.
-  if (n === 0 &&
-      state.needReadable &&
-      (state.length >= state.highWaterMark || state.ended)) {
+  if (n === 0 && state.needReadable && (state.length >= state.highWaterMark || state.ended)) {
     debug('read: emitReadable', state.length, state.ended);
-    if (state.length === 0 && state.ended)
-      endReadable(this);
-    else
-      emitReadable(this);
+    if (state.length === 0 && state.ended) endReadable(this);else emitReadable(this);
     return null;
   }
 
@@ -9247,8 +3767,7 @@ Readable.prototype.read = function(n) {
 
   // if we've ended, and we're now clear, then finish it up.
   if (n === 0 && state.ended) {
-    if (state.length === 0)
-      endReadable(this);
+    if (state.length === 0) endReadable(this);
     return null;
   }
 
@@ -9296,8 +3815,7 @@ Readable.prototype.read = function(n) {
     state.reading = true;
     state.sync = true;
     // if the length is currently zero, then we *need* a readable event.
-    if (state.length === 0)
-      state.needReadable = true;
+    if (state.length === 0) state.needReadable = true;
     // call internal read method
     this._read(state.highWaterMark);
     state.sync = false;
@@ -9305,14 +3823,10 @@ Readable.prototype.read = function(n) {
 
   // If _read pushed data synchronously, then `reading` will be false,
   // and we need to re-evaluate how much data we can return to the user.
-  if (doRead && !state.reading)
-    n = howMuchToRead(nOrig, state);
+  if (doRead && !state.reading) n = howMuchToRead(nOrig, state);
 
   var ret;
-  if (n > 0)
-    ret = fromList(n, state);
-  else
-    ret = null;
+  if (n > 0) ret = fromList(n, state);else ret = null;
 
   if (ret === null) {
     state.needReadable = true;
@@ -9323,31 +3837,23 @@ Readable.prototype.read = function(n) {
 
   // If we have nothing in the buffer, then we want to know
   // as soon as we *do* get something into the buffer.
-  if (state.length === 0 && !state.ended)
-    state.needReadable = true;
+  if (state.length === 0 && !state.ended) state.needReadable = true;
 
   // If we tried to read() past the EOF, then emit end on the next tick.
-  if (nOrig !== n && state.ended && state.length === 0)
-    endReadable(this);
+  if (nOrig !== n && state.ended && state.length === 0) endReadable(this);
 
-  if (ret !== null)
-    this.emit('data', ret);
+  if (ret !== null) this.emit('data', ret);
 
   return ret;
 };
 
 function chunkInvalid(state, chunk) {
   var er = null;
-  if (!(Buffer.isBuffer(chunk)) &&
-      typeof chunk !== 'string' &&
-      chunk !== null &&
-      chunk !== undefined &&
-      !state.objectMode) {
+  if (!Buffer.isBuffer(chunk) && typeof chunk !== 'string' && chunk !== null && chunk !== undefined && !state.objectMode) {
     er = new TypeError('Invalid non-string/buffer chunk');
   }
   return er;
 }
-
 
 function onEofChunk(stream, state) {
   if (state.ended) return;
@@ -9373,10 +3879,7 @@ function emitReadable(stream) {
   if (!state.emittedReadable) {
     debug('emitReadable', state.flowing);
     state.emittedReadable = true;
-    if (state.sync)
-      processNextTick(emitReadable_, stream);
-    else
-      emitReadable_(stream);
+    if (state.sync) processNextTick(emitReadable_, stream);else emitReadable_(stream);
   }
 }
 
@@ -9385,7 +3888,6 @@ function emitReadable_(stream) {
   stream.emit('readable');
   flow(stream);
 }
-
 
 // at this point, the user has presumably seen the 'readable' event,
 // and called read() to consume some data.  that may have triggered
@@ -9402,15 +3904,12 @@ function maybeReadMore(stream, state) {
 
 function maybeReadMore_(stream, state) {
   var len = state.length;
-  while (!state.reading && !state.flowing && !state.ended &&
-         state.length < state.highWaterMark) {
+  while (!state.reading && !state.flowing && !state.ended && state.length < state.highWaterMark) {
     debug('maybeReadMore read 0');
     stream.read(0);
     if (len === state.length)
       // didn't get any data, stop spinning.
-      break;
-    else
-      len = state.length;
+      break;else len = state.length;
   }
   state.readingMore = false;
 }
@@ -9419,11 +3918,11 @@ function maybeReadMore_(stream, state) {
 // call cb(er, data) where data is <= n in length.
 // for virtual (non-string, non-buffer) streams, "length" is somewhat
 // arbitrary, and perhaps not very meaningful.
-Readable.prototype._read = function(n) {
+Readable.prototype._read = function (n) {
   this.emit('error', new Error('not implemented'));
 };
 
-Readable.prototype.pipe = function(dest, pipeOpts) {
+Readable.prototype.pipe = function (dest, pipeOpts) {
   var src = this;
   var state = this._readableState;
 
@@ -9441,15 +3940,10 @@ Readable.prototype.pipe = function(dest, pipeOpts) {
   state.pipesCount += 1;
   debug('pipe count=%d opts=%j', state.pipesCount, pipeOpts);
 
-  var doEnd = (!pipeOpts || pipeOpts.end !== false) &&
-              dest !== process.stdout &&
-              dest !== process.stderr;
+  var doEnd = (!pipeOpts || pipeOpts.end !== false) && dest !== process.stdout && dest !== process.stderr;
 
   var endFn = doEnd ? onend : cleanup;
-  if (state.endEmitted)
-    processNextTick(endFn);
-  else
-    src.once('end', endFn);
+  if (state.endEmitted) processNextTick(endFn);else src.once('end', endFn);
 
   dest.on('unpipe', onunpipe);
   function onunpipe(readable) {
@@ -9491,9 +3985,7 @@ Readable.prototype.pipe = function(dest, pipeOpts) {
     // flowing again.
     // So, if this is awaiting a drain, then we just call it now.
     // If we don't know, then assume that we are waiting for one.
-    if (state.awaitDrain &&
-        (!dest._writableState || dest._writableState.needDrain))
-      ondrain();
+    if (state.awaitDrain && (!dest._writableState || dest._writableState.needDrain)) ondrain();
   }
 
   src.on('data', ondata);
@@ -9504,10 +3996,7 @@ Readable.prototype.pipe = function(dest, pipeOpts) {
       // If the user unpiped during `dest.write()`, it is possible
       // to get stuck in a permanently paused state if that write
       // also returned false.
-      if (state.pipesCount === 1 &&
-          state.pipes[0] === dest &&
-          src.listenerCount('data') === 1 &&
-          !cleanedUp) {
+      if (state.pipesCount === 1 && state.pipes[0] === dest && src.listenerCount('data') === 1 && !cleanedUp) {
         debug('false write response, pause', src._readableState.awaitDrain);
         src._readableState.awaitDrain++;
       }
@@ -9521,18 +4010,11 @@ Readable.prototype.pipe = function(dest, pipeOpts) {
     debug('onerror', er);
     unpipe();
     dest.removeListener('error', onerror);
-    if (EElistenerCount(dest, 'error') === 0)
-      dest.emit('error', er);
+    if (EElistenerCount(dest, 'error') === 0) dest.emit('error', er);
   }
   // This is a brutally ugly hack to make sure that our error handler
   // is attached before any userland ones.  NEVER DO THIS.
-  if (!dest._events || !dest._events.error)
-    dest.on('error', onerror);
-  else if (isArray(dest._events.error))
-    dest._events.error.unshift(onerror);
-  else
-    dest._events.error = [onerror, dest._events.error];
-
+  if (!dest._events || !dest._events.error) dest.on('error', onerror);else if (isArray(dest._events.error)) dest._events.error.unshift(onerror);else dest._events.error = [onerror, dest._events.error];
 
   // Both close and finish should trigger unpipe, but only once.
   function onclose() {
@@ -9565,11 +4047,10 @@ Readable.prototype.pipe = function(dest, pipeOpts) {
 };
 
 function pipeOnDrain(src) {
-  return function() {
+  return function () {
     var state = src._readableState;
     debug('pipeOnDrain', state.awaitDrain);
-    if (state.awaitDrain)
-      state.awaitDrain--;
+    if (state.awaitDrain) state.awaitDrain--;
     if (state.awaitDrain === 0 && EElistenerCount(src, 'data')) {
       state.flowing = true;
       flow(src);
@@ -9577,29 +4058,24 @@ function pipeOnDrain(src) {
   };
 }
 
-
-Readable.prototype.unpipe = function(dest) {
+Readable.prototype.unpipe = function (dest) {
   var state = this._readableState;
 
   // if we're not piping anywhere, then do nothing.
-  if (state.pipesCount === 0)
-    return this;
+  if (state.pipesCount === 0) return this;
 
   // just one destination.  most common case.
   if (state.pipesCount === 1) {
     // passed in one, but it's not the right one.
-    if (dest && dest !== state.pipes)
-      return this;
+    if (dest && dest !== state.pipes) return this;
 
-    if (!dest)
-      dest = state.pipes;
+    if (!dest) dest = state.pipes;
 
     // got a match.
     state.pipes = null;
     state.pipesCount = 0;
     state.flowing = false;
-    if (dest)
-      dest.emit('unpipe', this);
+    if (dest) dest.emit('unpipe', this);
     return this;
   }
 
@@ -9613,20 +4089,18 @@ Readable.prototype.unpipe = function(dest) {
     state.pipesCount = 0;
     state.flowing = false;
 
-    for (var i = 0; i < len; i++)
-      dests[i].emit('unpipe', this);
-    return this;
+    for (var _i = 0; _i < len; _i++) {
+      dests[_i].emit('unpipe', this);
+    }return this;
   }
 
   // try to find the right one.
   var i = indexOf(state.pipes, dest);
-  if (i === -1)
-    return this;
+  if (i === -1) return this;
 
   state.pipes.splice(i, 1);
   state.pipesCount -= 1;
-  if (state.pipesCount === 1)
-    state.pipes = state.pipes[0];
+  if (state.pipesCount === 1) state.pipes = state.pipes[0];
 
   dest.emit('unpipe', this);
 
@@ -9635,7 +4109,7 @@ Readable.prototype.unpipe = function(dest) {
 
 // set up data events if they are asked for
 // Ensure readable listeners eventually get something
-Readable.prototype.on = function(ev, fn) {
+Readable.prototype.on = function (ev, fn) {
   var res = Stream.prototype.on.call(this, ev, fn);
 
   // If listening to data, and it has not explicitly been paused,
@@ -9644,7 +4118,7 @@ Readable.prototype.on = function(ev, fn) {
     this.resume();
   }
 
-  if (ev === 'readable' && this.readable) {
+  if (ev === 'readable' && !this._readableState.endEmitted) {
     var state = this._readableState;
     if (!state.readableListening) {
       state.readableListening = true;
@@ -9669,7 +4143,7 @@ function nReadingNextTick(self) {
 
 // pause() and resume() are remnants of the legacy readable stream API
 // If the user uses them, then switch into old mode.
-Readable.prototype.resume = function() {
+Readable.prototype.resume = function () {
   var state = this._readableState;
   if (!state.flowing) {
     debug('resume');
@@ -9695,11 +4169,10 @@ function resume_(stream, state) {
   state.resumeScheduled = false;
   stream.emit('resume');
   flow(stream);
-  if (state.flowing && !state.reading)
-    stream.read(0);
+  if (state.flowing && !state.reading) stream.read(0);
 }
 
-Readable.prototype.pause = function() {
+Readable.prototype.pause = function () {
   debug('call pause flowing=%j', this._readableState.flowing);
   if (false !== this._readableState.flowing) {
     debug('pause');
@@ -9722,32 +4195,27 @@ function flow(stream) {
 // wrap an old-style stream as the async data source.
 // This is *not* part of the readable stream interface.
 // It is an ugly unfortunate mess of history.
-Readable.prototype.wrap = function(stream) {
+Readable.prototype.wrap = function (stream) {
   var state = this._readableState;
   var paused = false;
 
   var self = this;
-  stream.on('end', function() {
+  stream.on('end', function () {
     debug('wrapped end');
     if (state.decoder && !state.ended) {
       var chunk = state.decoder.end();
-      if (chunk && chunk.length)
-        self.push(chunk);
+      if (chunk && chunk.length) self.push(chunk);
     }
 
     self.push(null);
   });
 
-  stream.on('data', function(chunk) {
+  stream.on('data', function (chunk) {
     debug('wrapped data');
-    if (state.decoder)
-      chunk = state.decoder.write(chunk);
+    if (state.decoder) chunk = state.decoder.write(chunk);
 
     // don't skip over falsy values in objectMode
-    if (state.objectMode && (chunk === null || chunk === undefined))
-      return;
-    else if (!state.objectMode && (!chunk || !chunk.length))
-      return;
+    if (state.objectMode && (chunk === null || chunk === undefined)) return;else if (!state.objectMode && (!chunk || !chunk.length)) return;
 
     var ret = self.push(chunk);
     if (!ret) {
@@ -9760,21 +4228,23 @@ Readable.prototype.wrap = function(stream) {
   // important when wrapping filters and duplexes.
   for (var i in stream) {
     if (this[i] === undefined && typeof stream[i] === 'function') {
-      this[i] = function(method) { return function() {
-        return stream[method].apply(stream, arguments);
-      }; }(i);
+      this[i] = function (method) {
+        return function () {
+          return stream[method].apply(stream, arguments);
+        };
+      }(i);
     }
   }
 
   // proxy certain important events.
   var events = ['error', 'close', 'destroy', 'pause', 'resume'];
-  forEach(events, function(ev) {
+  forEach(events, function (ev) {
     stream.on(ev, self.emit.bind(self, ev));
   });
 
   // when we try to consume some more bytes, simply unpause the
   // underlying stream.
-  self._read = function(n) {
+  self._read = function (n) {
     debug('wrapped _read', n);
     if (paused) {
       paused = false;
@@ -9784,7 +4254,6 @@ Readable.prototype.wrap = function(stream) {
 
   return self;
 };
-
 
 // exposed for testing purposes only.
 Readable._fromList = fromList;
@@ -9799,21 +4268,11 @@ function fromList(n, state) {
   var ret;
 
   // nothing in the list, definitely empty.
-  if (list.length === 0)
-    return null;
+  if (list.length === 0) return null;
 
-  if (length === 0)
-    ret = null;
-  else if (objectMode)
-    ret = list.shift();
-  else if (!n || n >= length) {
+  if (length === 0) ret = null;else if (objectMode) ret = list.shift();else if (!n || n >= length) {
     // read it all, truncate the array.
-    if (stringMode)
-      ret = list.join('');
-    else if (list.length === 1)
-      ret = list[0];
-    else
-      ret = Buffer.concat(list, length);
+    if (stringMode) ret = list.join('');else if (list.length === 1) ret = list[0];else ret = Buffer.concat(list, length);
     list.length = 0;
   } else {
     // read just some of it.
@@ -9829,25 +4288,16 @@ function fromList(n, state) {
     } else {
       // complex case.
       // we have enough to cover it, but it spans past the first buffer.
-      if (stringMode)
-        ret = '';
-      else
-        ret = new Buffer(n);
+      if (stringMode) ret = '';else ret = new Buffer(n);
 
       var c = 0;
       for (var i = 0, l = list.length; i < l && c < n; i++) {
         var buf = list[0];
         var cpy = Math.min(n - c, buf.length);
 
-        if (stringMode)
-          ret += buf.slice(0, cpy);
-        else
-          buf.copy(ret, c, 0, cpy);
+        if (stringMode) ret += buf.slice(0, cpy);else buf.copy(ret, c, 0, cpy);
 
-        if (cpy < buf.length)
-          list[0] = buf.slice(cpy);
-        else
-          list.shift();
+        if (cpy < buf.length) list[0] = buf.slice(cpy);else list.shift();
 
         c += cpy;
       }
@@ -9862,8 +4312,7 @@ function endReadable(stream) {
 
   // If we get here before consuming all the bytes, then that is a
   // bug in node.  Should never happen.
-  if (state.length > 0)
-    throw new Error('endReadable called on non-empty stream');
+  if (state.length > 0) throw new Error('endReadable called on non-empty stream');
 
   if (!state.endEmitted) {
     state.ended = true;
@@ -9880,21 +4329,20 @@ function endReadableNT(state, stream) {
   }
 }
 
-function forEach (xs, f) {
+function forEach(xs, f) {
   for (var i = 0, l = xs.length; i < l; i++) {
     f(xs[i], i);
   }
 }
 
-function indexOf (xs, x) {
+function indexOf(xs, x) {
   for (var i = 0, l = xs.length; i < l; i++) {
     if (xs[i] === x) return i;
   }
   return -1;
 }
-
 }).call(this,require('_process'))
-},{"./_stream_duplex":43,"_process":69,"buffer":4,"core-util-is":6,"events":50,"inherits":52,"isarray":54,"process-nextick-args":68,"string_decoder/":94,"util":3}],46:[function(require,module,exports){
+},{"./_stream_duplex":15,"_process":41,"buffer":4,"core-util-is":6,"events":22,"inherits":24,"isarray":14,"process-nextick-args":40,"string_decoder/":66,"util":3}],18:[function(require,module,exports){
 // a transform stream is a readable/writable stream where you do
 // something with the data.  Sometimes it's called a "filter",
 // but that's not a great name for it, since that implies a thing where
@@ -9950,9 +4398,8 @@ util.inherits = require('inherits');
 
 util.inherits(Transform, Duplex);
 
-
 function TransformState(stream) {
-  this.afterTransform = function(er, data) {
+  this.afterTransform = function (er, data) {
     return afterTransform(stream, er, data);
   };
 
@@ -9960,6 +4407,7 @@ function TransformState(stream) {
   this.transforming = false;
   this.writecb = null;
   this.writechunk = null;
+  this.writeencoding = null;
 }
 
 function afterTransform(stream, er, data) {
@@ -9968,17 +4416,14 @@ function afterTransform(stream, er, data) {
 
   var cb = ts.writecb;
 
-  if (!cb)
-    return stream.emit('error', new Error('no writecb in Transform class'));
+  if (!cb) return stream.emit('error', new Error('no writecb in Transform class'));
 
   ts.writechunk = null;
   ts.writecb = null;
 
-  if (data !== null && data !== undefined)
-    stream.push(data);
+  if (data !== null && data !== undefined) stream.push(data);
 
-  if (cb)
-    cb(er);
+  cb(er);
 
   var rs = stream._readableState;
   rs.reading = false;
@@ -9987,10 +4432,8 @@ function afterTransform(stream, er, data) {
   }
 }
 
-
 function Transform(options) {
-  if (!(this instanceof Transform))
-    return new Transform(options);
+  if (!(this instanceof Transform)) return new Transform(options);
 
   Duplex.call(this, options);
 
@@ -10008,24 +4451,19 @@ function Transform(options) {
   this._readableState.sync = false;
 
   if (options) {
-    if (typeof options.transform === 'function')
-      this._transform = options.transform;
+    if (typeof options.transform === 'function') this._transform = options.transform;
 
-    if (typeof options.flush === 'function')
-      this._flush = options.flush;
+    if (typeof options.flush === 'function') this._flush = options.flush;
   }
 
-  this.once('prefinish', function() {
-    if (typeof this._flush === 'function')
-      this._flush(function(er) {
-        done(stream, er);
-      });
-    else
-      done(stream);
+  this.once('prefinish', function () {
+    if (typeof this._flush === 'function') this._flush(function (er) {
+      done(stream, er);
+    });else done(stream);
   });
 }
 
-Transform.prototype.push = function(chunk, encoding) {
+Transform.prototype.push = function (chunk, encoding) {
   this._transformState.needTransform = false;
   return Duplex.prototype.push.call(this, chunk, encoding);
 };
@@ -10040,28 +4478,25 @@ Transform.prototype.push = function(chunk, encoding) {
 // Call `cb(err)` when you are done with this chunk.  If you pass
 // an error, then that'll put the hurt on the whole operation.  If you
 // never call cb(), then you'll never get another chunk.
-Transform.prototype._transform = function(chunk, encoding, cb) {
+Transform.prototype._transform = function (chunk, encoding, cb) {
   throw new Error('not implemented');
 };
 
-Transform.prototype._write = function(chunk, encoding, cb) {
+Transform.prototype._write = function (chunk, encoding, cb) {
   var ts = this._transformState;
   ts.writecb = cb;
   ts.writechunk = chunk;
   ts.writeencoding = encoding;
   if (!ts.transforming) {
     var rs = this._readableState;
-    if (ts.needTransform ||
-        rs.needReadable ||
-        rs.length < rs.highWaterMark)
-      this._read(rs.highWaterMark);
+    if (ts.needTransform || rs.needReadable || rs.length < rs.highWaterMark) this._read(rs.highWaterMark);
   }
 };
 
 // Doesn't matter what the args are here.
 // _transform does all the work.
 // That we got here means that the readable side wants more data.
-Transform.prototype._read = function(n) {
+Transform.prototype._read = function (n) {
   var ts = this._transformState;
 
   if (ts.writechunk !== null && ts.writecb && !ts.transforming) {
@@ -10074,26 +4509,22 @@ Transform.prototype._read = function(n) {
   }
 };
 
-
 function done(stream, er) {
-  if (er)
-    return stream.emit('error', er);
+  if (er) return stream.emit('error', er);
 
   // if there's nothing in the write buffer, then that means
   // that nothing more will ever be provided
   var ws = stream._writableState;
   var ts = stream._transformState;
 
-  if (ws.length)
-    throw new Error('calling transform done when ws.length != 0');
+  if (ws.length) throw new Error('calling transform done when ws.length != 0');
 
-  if (ts.transforming)
-    throw new Error('calling transform done when still transforming');
+  if (ts.transforming) throw new Error('calling transform done when still transforming');
 
   return stream.push(null);
 }
-
-},{"./_stream_duplex":43,"core-util-is":6,"inherits":52}],47:[function(require,module,exports){
+},{"./_stream_duplex":15,"core-util-is":6,"inherits":24}],19:[function(require,module,exports){
+(function (process){
 // A bit simpler than readable streams.
 // Implement an async ._write(chunk, encoding, cb), and it'll handle all
 // the drain event emission and buffering.
@@ -10106,6 +4537,9 @@ module.exports = Writable;
 var processNextTick = require('process-nextick-args');
 /*</replacement>*/
 
+/*<replacement>*/
+var asyncWrite = !process.browser && ['v0.10', 'v0.9.'].indexOf(process.version.slice(0, 5)) > -1 ? setImmediate : processNextTick;
+/*</replacement>*/
 
 /*<replacement>*/
 var Buffer = require('buffer').Buffer;
@@ -10113,12 +4547,10 @@ var Buffer = require('buffer').Buffer;
 
 Writable.WritableState = WritableState;
 
-
 /*<replacement>*/
 var util = require('core-util-is');
 util.inherits = require('inherits');
 /*</replacement>*/
-
 
 /*<replacement>*/
 var internalUtil = {
@@ -10126,16 +4558,15 @@ var internalUtil = {
 };
 /*</replacement>*/
 
-
-
 /*<replacement>*/
 var Stream;
-(function (){try{
-  Stream = require('st' + 'ream');
-}catch(_){}finally{
-  if (!Stream)
-    Stream = require('events').EventEmitter;
-}}())
+(function () {
+  try {
+    Stream = require('st' + 'ream');
+  } catch (_) {} finally {
+    if (!Stream) Stream = require('events').EventEmitter;
+  }
+})();
 /*</replacement>*/
 
 var Buffer = require('buffer').Buffer;
@@ -10161,18 +4592,17 @@ function WritableState(options, stream) {
   // contains buffers or objects.
   this.objectMode = !!options.objectMode;
 
-  if (stream instanceof Duplex)
-    this.objectMode = this.objectMode || !!options.writableObjectMode;
+  if (stream instanceof Duplex) this.objectMode = this.objectMode || !!options.writableObjectMode;
 
   // the point at which write() starts returning false
   // Note: 0 is a valid value, means that we always return false if
   // the entire buffer is not flushed immediately on write()
   var hwm = options.highWaterMark;
   var defaultHwm = this.objectMode ? 16 : 16 * 1024;
-  this.highWaterMark = (hwm || hwm === 0) ? hwm : defaultHwm;
+  this.highWaterMark = hwm || hwm === 0 ? hwm : defaultHwm;
 
   // cast to ints.
-  this.highWaterMark = ~~this.highWaterMark;
+  this.highWaterMark = ~ ~this.highWaterMark;
 
   this.needDrain = false;
   // at the start of calling end()
@@ -10216,7 +4646,7 @@ function WritableState(options, stream) {
   this.bufferProcessing = false;
 
   // the callback that's passed to _write(chunk,cb)
-  this.onwrite = function(er) {
+  this.onwrite = function (er) {
     onwrite(stream, er);
   };
 
@@ -10239,6 +4669,14 @@ function WritableState(options, stream) {
 
   // True if the error was already emitted and should not be thrown again
   this.errorEmitted = false;
+
+  // count buffered requests
+  this.bufferedRequestCount = 0;
+
+  // create the two objects needed to store the corked requests
+  // they are not a linked list, as no new elements are inserted in there
+  this.corkedRequestsFree = new CorkedRequest(this);
+  this.corkedRequestsFree.next = new CorkedRequest(this);
 }
 
 WritableState.prototype.getBuffer = function writableStateGetBuffer() {
@@ -10251,15 +4689,15 @@ WritableState.prototype.getBuffer = function writableStateGetBuffer() {
   return out;
 };
 
-(function (){try {
-Object.defineProperty(WritableState.prototype, 'buffer', {
-  get: internalUtil.deprecate(function() {
-    return this.getBuffer();
-  }, '_writableState.buffer is deprecated. Use _writableState.getBuffer ' +
-     'instead.')
-});
-}catch(_){}}());
-
+(function () {
+  try {
+    Object.defineProperty(WritableState.prototype, 'buffer', {
+      get: internalUtil.deprecate(function () {
+        return this.getBuffer();
+      }, '_writableState.buffer is deprecated. Use _writableState.getBuffer ' + 'instead.')
+    });
+  } catch (_) {}
+})();
 
 var Duplex;
 function Writable(options) {
@@ -10267,8 +4705,7 @@ function Writable(options) {
 
   // Writable ctor is applied to Duplexes, though they're not
   // instanceof Writable, they're instanceof Readable.
-  if (!(this instanceof Writable) && !(this instanceof Duplex))
-    return new Writable(options);
+  if (!(this instanceof Writable) && !(this instanceof Duplex)) return new Writable(options);
 
   this._writableState = new WritableState(options, this);
 
@@ -10276,21 +4713,18 @@ function Writable(options) {
   this.writable = true;
 
   if (options) {
-    if (typeof options.write === 'function')
-      this._write = options.write;
+    if (typeof options.write === 'function') this._write = options.write;
 
-    if (typeof options.writev === 'function')
-      this._writev = options.writev;
+    if (typeof options.writev === 'function') this._writev = options.writev;
   }
 
   Stream.call(this);
 }
 
 // Otherwise people can pipe Writable streams, which is just wrong.
-Writable.prototype.pipe = function() {
+Writable.prototype.pipe = function () {
   this.emit('error', new Error('Cannot pipe. Not readable.'));
 };
-
 
 function writeAfterEnd(stream, cb) {
   var er = new Error('write after end');
@@ -10307,11 +4741,7 @@ function writeAfterEnd(stream, cb) {
 function validChunk(stream, state, chunk, cb) {
   var valid = true;
 
-  if (!(Buffer.isBuffer(chunk)) &&
-      typeof chunk !== 'string' &&
-      chunk !== null &&
-      chunk !== undefined &&
-      !state.objectMode) {
+  if (!Buffer.isBuffer(chunk) && typeof chunk !== 'string' && chunk !== null && chunk !== undefined && !state.objectMode) {
     var er = new TypeError('Invalid non-string/buffer chunk');
     stream.emit('error', er);
     processNextTick(cb, er);
@@ -10320,7 +4750,7 @@ function validChunk(stream, state, chunk, cb) {
   return valid;
 }
 
-Writable.prototype.write = function(chunk, encoding, cb) {
+Writable.prototype.write = function (chunk, encoding, cb) {
   var state = this._writableState;
   var ret = false;
 
@@ -10329,17 +4759,11 @@ Writable.prototype.write = function(chunk, encoding, cb) {
     encoding = null;
   }
 
-  if (Buffer.isBuffer(chunk))
-    encoding = 'buffer';
-  else if (!encoding)
-    encoding = state.defaultEncoding;
+  if (Buffer.isBuffer(chunk)) encoding = 'buffer';else if (!encoding) encoding = state.defaultEncoding;
 
-  if (typeof cb !== 'function')
-    cb = nop;
+  if (typeof cb !== 'function') cb = nop;
 
-  if (state.ended)
-    writeAfterEnd(this, cb);
-  else if (validChunk(this, state, chunk, cb)) {
+  if (state.ended) writeAfterEnd(this, cb);else if (validChunk(this, state, chunk, cb)) {
     state.pendingcb++;
     ret = writeOrBuffer(this, state, chunk, encoding, cb);
   }
@@ -10347,42 +4771,31 @@ Writable.prototype.write = function(chunk, encoding, cb) {
   return ret;
 };
 
-Writable.prototype.cork = function() {
+Writable.prototype.cork = function () {
   var state = this._writableState;
 
   state.corked++;
 };
 
-Writable.prototype.uncork = function() {
+Writable.prototype.uncork = function () {
   var state = this._writableState;
 
   if (state.corked) {
     state.corked--;
 
-    if (!state.writing &&
-        !state.corked &&
-        !state.finished &&
-        !state.bufferProcessing &&
-        state.bufferedRequest)
-      clearBuffer(this, state);
+    if (!state.writing && !state.corked && !state.finished && !state.bufferProcessing && state.bufferedRequest) clearBuffer(this, state);
   }
 };
 
 Writable.prototype.setDefaultEncoding = function setDefaultEncoding(encoding) {
   // node::ParseEncoding() requires lower case.
-  if (typeof encoding === 'string')
-    encoding = encoding.toLowerCase();
-  if (!(['hex', 'utf8', 'utf-8', 'ascii', 'binary', 'base64',
-'ucs2', 'ucs-2','utf16le', 'utf-16le', 'raw']
-.indexOf((encoding + '').toLowerCase()) > -1))
-    throw new TypeError('Unknown encoding: ' + encoding);
+  if (typeof encoding === 'string') encoding = encoding.toLowerCase();
+  if (!(['hex', 'utf8', 'utf-8', 'ascii', 'binary', 'base64', 'ucs2', 'ucs-2', 'utf16le', 'utf-16le', 'raw'].indexOf((encoding + '').toLowerCase()) > -1)) throw new TypeError('Unknown encoding: ' + encoding);
   this._writableState.defaultEncoding = encoding;
 };
 
 function decodeChunk(state, chunk, encoding) {
-  if (!state.objectMode &&
-      state.decodeStrings !== false &&
-      typeof chunk === 'string') {
+  if (!state.objectMode && state.decodeStrings !== false && typeof chunk === 'string') {
     chunk = new Buffer(chunk, encoding);
   }
   return chunk;
@@ -10394,16 +4807,14 @@ function decodeChunk(state, chunk, encoding) {
 function writeOrBuffer(stream, state, chunk, encoding, cb) {
   chunk = decodeChunk(state, chunk, encoding);
 
-  if (Buffer.isBuffer(chunk))
-    encoding = 'buffer';
+  if (Buffer.isBuffer(chunk)) encoding = 'buffer';
   var len = state.objectMode ? 1 : chunk.length;
 
   state.length += len;
 
   var ret = state.length < state.highWaterMark;
   // we must ensure that previous needDrain will not be reset to false.
-  if (!ret)
-    state.needDrain = true;
+  if (!ret) state.needDrain = true;
 
   if (state.writing || state.corked) {
     var last = state.lastBufferedRequest;
@@ -10413,6 +4824,7 @@ function writeOrBuffer(stream, state, chunk, encoding, cb) {
     } else {
       state.bufferedRequest = state.lastBufferedRequest;
     }
+    state.bufferedRequestCount += 1;
   } else {
     doWrite(stream, state, false, len, chunk, encoding, cb);
   }
@@ -10425,19 +4837,13 @@ function doWrite(stream, state, writev, len, chunk, encoding, cb) {
   state.writecb = cb;
   state.writing = true;
   state.sync = true;
-  if (writev)
-    stream._writev(chunk, state.onwrite);
-  else
-    stream._write(chunk, encoding, state.onwrite);
+  if (writev) stream._writev(chunk, state.onwrite);else stream._write(chunk, encoding, state.onwrite);
   state.sync = false;
 }
 
 function onwriteError(stream, state, sync, er, cb) {
   --state.pendingcb;
-  if (sync)
-    processNextTick(cb, er);
-  else
-    cb(er);
+  if (sync) processNextTick(cb, er);else cb(er);
 
   stream._writableState.errorEmitted = true;
   stream.emit('error', er);
@@ -10457,30 +4863,26 @@ function onwrite(stream, er) {
 
   onwriteStateUpdate(state);
 
-  if (er)
-    onwriteError(stream, state, sync, er, cb);
-  else {
+  if (er) onwriteError(stream, state, sync, er, cb);else {
     // Check if we're actually ready to finish, but don't emit yet
     var finished = needFinish(state);
 
-    if (!finished &&
-        !state.corked &&
-        !state.bufferProcessing &&
-        state.bufferedRequest) {
+    if (!finished && !state.corked && !state.bufferProcessing && state.bufferedRequest) {
       clearBuffer(stream, state);
     }
 
     if (sync) {
-      processNextTick(afterWrite, stream, state, finished, cb);
+      /*<replacement>*/
+      asyncWrite(afterWrite, stream, state, finished, cb);
+      /*</replacement>*/
     } else {
-      afterWrite(stream, state, finished, cb);
-    }
+        afterWrite(stream, state, finished, cb);
+      }
   }
 }
 
 function afterWrite(stream, state, finished, cb) {
-  if (!finished)
-    onwriteDrain(stream, state);
+  if (!finished) onwriteDrain(stream, state);
   state.pendingcb--;
   cb();
   finishMaybe(stream, state);
@@ -10496,7 +4898,6 @@ function onwriteDrain(stream, state) {
   }
 }
 
-
 // if there's something in the buffer waiting, then process it
 function clearBuffer(stream, state) {
   state.bufferProcessing = true;
@@ -10504,26 +4905,26 @@ function clearBuffer(stream, state) {
 
   if (stream._writev && entry && entry.next) {
     // Fast case, write everything using _writev()
-    var buffer = [];
-    var cbs = [];
+    var l = state.bufferedRequestCount;
+    var buffer = new Array(l);
+    var holder = state.corkedRequestsFree;
+    holder.entry = entry;
+
+    var count = 0;
     while (entry) {
-      cbs.push(entry.callback);
-      buffer.push(entry);
+      buffer[count] = entry;
       entry = entry.next;
+      count += 1;
     }
 
-    // count the one we are adding, as well.
-    // TODO(isaacs) clean this up
+    doWrite(stream, state, true, state.length, buffer, '', holder.finish);
+
+    // doWrite is always async, defer these to save a bit of time
+    // as the hot path ends with doWrite
     state.pendingcb++;
     state.lastBufferedRequest = null;
-    doWrite(stream, state, true, state.length, buffer, '', function(err) {
-      for (var i = 0; i < cbs.length; i++) {
-        state.pendingcb--;
-        cbs[i](err);
-      }
-    });
-
-    // Clear buffer
+    state.corkedRequestsFree = holder.next;
+    holder.next = null;
   } else {
     // Slow case, write chunks one-by-one
     while (entry) {
@@ -10543,20 +4944,21 @@ function clearBuffer(stream, state) {
       }
     }
 
-    if (entry === null)
-      state.lastBufferedRequest = null;
+    if (entry === null) state.lastBufferedRequest = null;
   }
+
+  state.bufferedRequestCount = 0;
   state.bufferedRequest = entry;
   state.bufferProcessing = false;
 }
 
-Writable.prototype._write = function(chunk, encoding, cb) {
+Writable.prototype._write = function (chunk, encoding, cb) {
   cb(new Error('not implemented'));
 };
 
 Writable.prototype._writev = null;
 
-Writable.prototype.end = function(chunk, encoding, cb) {
+Writable.prototype.end = function (chunk, encoding, cb) {
   var state = this._writableState;
 
   if (typeof chunk === 'function') {
@@ -10568,8 +4970,7 @@ Writable.prototype.end = function(chunk, encoding, cb) {
     encoding = null;
   }
 
-  if (chunk !== null && chunk !== undefined)
-    this.write(chunk, encoding);
+  if (chunk !== null && chunk !== undefined) this.write(chunk, encoding);
 
   // .end() fully uncorks
   if (state.corked) {
@@ -10578,17 +4979,11 @@ Writable.prototype.end = function(chunk, encoding, cb) {
   }
 
   // ignore unnecessary end() calls.
-  if (!state.ending && !state.finished)
-    endWritable(this, state, cb);
+  if (!state.ending && !state.finished) endWritable(this, state, cb);
 };
 
-
 function needFinish(state) {
-  return (state.ending &&
-          state.length === 0 &&
-          state.bufferedRequest === null &&
-          !state.finished &&
-          !state.writing);
+  return state.ending && state.length === 0 && state.bufferedRequest === null && !state.finished && !state.writing;
 }
 
 function prefinish(stream, state) {
@@ -10616,15 +5011,38 @@ function endWritable(stream, state, cb) {
   state.ending = true;
   finishMaybe(stream, state);
   if (cb) {
-    if (state.finished)
-      processNextTick(cb);
-    else
-      stream.once('finish', cb);
+    if (state.finished) processNextTick(cb);else stream.once('finish', cb);
   }
   state.ended = true;
+  stream.writable = false;
 }
 
-},{"./_stream_duplex":43,"buffer":4,"core-util-is":6,"events":50,"inherits":52,"process-nextick-args":68,"util-deprecate":97}],48:[function(require,module,exports){
+// It seems a linked list but it is not
+// there will be only 2 of these for each stream
+function CorkedRequest(state) {
+  var _this = this;
+
+  this.next = null;
+  this.entry = null;
+
+  this.finish = function (err) {
+    var entry = _this.entry;
+    _this.entry = null;
+    while (entry) {
+      var cb = entry.callback;
+      state.pendingcb--;
+      cb(err);
+      entry = entry.next;
+    }
+    if (state.corkedRequestsFree) {
+      state.corkedRequestsFree.next = _this;
+    } else {
+      state.corkedRequestsFree = _this;
+    }
+  };
+}
+}).call(this,require('_process'))
+},{"./_stream_duplex":15,"_process":41,"buffer":4,"core-util-is":6,"events":22,"inherits":24,"process-nextick-args":40,"util-deprecate":69}],20:[function(require,module,exports){
 var Stream = (function (){
   try {
     return require('st' + 'ream'); // hack to fix a circular dependency issue when used with browserify
@@ -10638,7 +5056,7 @@ exports.Duplex = require('./lib/_stream_duplex.js');
 exports.Transform = require('./lib/_stream_transform.js');
 exports.PassThrough = require('./lib/_stream_passthrough.js');
 
-},{"./lib/_stream_duplex.js":43,"./lib/_stream_passthrough.js":44,"./lib/_stream_readable.js":45,"./lib/_stream_transform.js":46,"./lib/_stream_writable.js":47}],49:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":15,"./lib/_stream_passthrough.js":16,"./lib/_stream_readable.js":17,"./lib/_stream_transform.js":18,"./lib/_stream_writable.js":19}],21:[function(require,module,exports){
 var once = require('once');
 
 var noop = function() {};
@@ -10722,7 +5140,7 @@ var eos = function(stream, opts, callback) {
 };
 
 module.exports = eos;
-},{"once":67}],50:[function(require,module,exports){
+},{"once":39}],22:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -11022,7 +5440,7 @@ function isUndefined(arg) {
   return arg === void 0;
 }
 
-},{}],51:[function(require,module,exports){
+},{}],23:[function(require,module,exports){
 exports.read = function (buffer, offset, isLE, mLen, nBytes) {
   var e, m
   var eLen = nBytes * 8 - mLen - 1
@@ -11108,7 +5526,7 @@ exports.write = function (buffer, value, offset, isLE, mLen, nBytes) {
   buffer[offset + i - d] |= s * 128
 }
 
-},{}],52:[function(require,module,exports){
+},{}],24:[function(require,module,exports){
 if (typeof Object.create === 'function') {
   // implementation from standard node.js 'util' module
   module.exports = function inherits(ctor, superCtor) {
@@ -11133,7 +5551,7 @@ if (typeof Object.create === 'function') {
   }
 }
 
-},{}],53:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 /**
  * Determine if an object is Buffer
  *
@@ -11152,12 +5570,12 @@ module.exports = function (obj) {
     ))
 }
 
-},{}],54:[function(require,module,exports){
+},{}],26:[function(require,module,exports){
 module.exports = Array.isArray || function (arr) {
   return Object.prototype.toString.call(arr) == '[object Array]';
 };
 
-},{}],55:[function(require,module,exports){
+},{}],27:[function(require,module,exports){
 //! moment.js
 //! version : 2.12.0
 //! authors : Tim Wood, Iskren Chernev, Moment.js contributors
@@ -14846,7 +9264,7 @@ module.exports = Array.isArray || function (arr) {
     return _moment;
 
 }));
-},{}],56:[function(require,module,exports){
+},{}],28:[function(require,module,exports){
 /* Protocol - protocol constants */
 
 /* Command code => mnemonic */
@@ -14900,7 +9318,7 @@ module.exports.WILL_QOS_SHIFT = 3;
 module.exports.WILL_FLAG_MASK = 0x04;
 module.exports.CLEAN_SESSION_MASK = 0x02;
 
-},{}],57:[function(require,module,exports){
+},{}],29:[function(require,module,exports){
 (function (Buffer){
 
 'use strict';
@@ -15518,14 +9936,14 @@ function byteLength(bufOrString) {
 module.exports = generate
 
 }).call(this,require("buffer").Buffer)
-},{"./constants":56,"buffer":4}],58:[function(require,module,exports){
+},{"./constants":28,"buffer":4}],30:[function(require,module,exports){
 
 'use strict';
 
 exports.parser          = require('./parser')
 exports.generate        = require('./generate')
 
-},{"./generate":57,"./parser":60}],59:[function(require,module,exports){
+},{"./generate":29,"./parser":32}],31:[function(require,module,exports){
 
 function Packet() {
   this.cmd = null
@@ -15539,7 +9957,7 @@ function Packet() {
 
 module.exports = Packet
 
-},{}],60:[function(require,module,exports){
+},{}],32:[function(require,module,exports){
 
 var bl        = require('bl')
   , inherits  = require('inherits')
@@ -15929,7 +10347,7 @@ Parser.prototype._parseNum = function() {
 
 module.exports = Parser
 
-},{"./constants":56,"./packet":59,"bl":2,"events":50,"inherits":52}],61:[function(require,module,exports){
+},{"./constants":28,"./packet":31,"bl":2,"events":22,"inherits":24}],33:[function(require,module,exports){
 (function (process,global){
 'use strict';
 /**
@@ -16817,7 +11235,7 @@ MqttClient.prototype._nextId = function () {
 module.exports = MqttClient;
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./store":66,"_process":69,"end-of-stream":49,"events":50,"inherits":52,"mqtt-packet":58,"readable-stream":81,"reinterval":82}],62:[function(require,module,exports){
+},{"./store":38,"_process":41,"end-of-stream":21,"events":22,"inherits":24,"mqtt-packet":30,"readable-stream":53,"reinterval":54}],34:[function(require,module,exports){
 (function (process){
 'use strict';
 var MqttClient = require('../client'),
@@ -16957,7 +11375,7 @@ module.exports = connect;
 module.exports.connect = connect;
 
 }).call(this,require('_process'))
-},{"../client":61,"./tcp":63,"./tls":64,"./ws":65,"_process":69,"url":95,"xtend":109}],63:[function(require,module,exports){
+},{"../client":33,"./tcp":35,"./tls":36,"./ws":37,"_process":41,"url":67,"xtend":82}],35:[function(require,module,exports){
 'use strict';
 var net = require('net');
 
@@ -16978,7 +11396,7 @@ function buildBuilder (client, opts) {
 
 module.exports = buildBuilder;
 
-},{"net":3}],64:[function(require,module,exports){
+},{"net":3}],36:[function(require,module,exports){
 'use strict';
 var tls = require('tls');
 
@@ -17028,12 +11446,20 @@ function buildBuilder (mqttClient, opts) {
 
 module.exports = buildBuilder;
 
-},{"tls":3}],65:[function(require,module,exports){
+},{"tls":3}],37:[function(require,module,exports){
 (function (process){
 'use strict';
 
 var websocket = require('websocket-stream'),
-  _URL = require('url');
+  _URL = require('url'),
+  wssProperties = [
+    'rejectUnauthorized',
+    'ca',
+    'cert',
+    'key',
+    'pfx',
+    'passphrase'
+  ];
 
 function buildBuilder (client, opts) {
   var wsOpt = {
@@ -17045,9 +11471,11 @@ function buildBuilder (client, opts) {
     url = opts.protocol + '://' + host + ':' + port + path;
 
   if ('wss' === opts.protocol) {
-    if (opts.hasOwnProperty('rejectUnauthorized')) {
-      wsOpt.rejectUnauthorized = opts.rejectUnauthorized;
-    }
+    wssProperties.forEach(function (prop) {
+      if (opts.hasOwnProperty(prop)) {
+        wsOpt[prop] = opts[prop];
+      }
+    });
   }
 
   return websocket(url, wsOpt);
@@ -17104,7 +11532,7 @@ if ('browser' !== process.title) {
 }
 
 }).call(this,require('_process'))
-},{"_process":69,"url":95,"websocket-stream":106}],66:[function(require,module,exports){
+},{"_process":41,"url":67,"websocket-stream":79}],38:[function(require,module,exports){
 (function (process){
 'use strict';
 var Readable = require('readable-stream').Readable,
@@ -17216,7 +11644,7 @@ Store.prototype.close = function (cb) {
 module.exports = Store;
 
 }).call(this,require('_process'))
-},{"_process":69,"readable-stream":81}],67:[function(require,module,exports){
+},{"_process":41,"readable-stream":53}],39:[function(require,module,exports){
 var wrappy = require('wrappy')
 module.exports = wrappy(once)
 
@@ -17239,7 +11667,7 @@ function once (fn) {
   return f
 }
 
-},{"wrappy":108}],68:[function(require,module,exports){
+},{"wrappy":81}],40:[function(require,module,exports){
 (function (process){
 'use strict';
 
@@ -17263,7 +11691,7 @@ function nextTick(fn) {
 }
 
 }).call(this,require('_process'))
-},{"_process":69}],69:[function(require,module,exports){
+},{"_process":41}],41:[function(require,module,exports){
 // shim for using process in browser
 
 var process = module.exports = {};
@@ -17356,7 +11784,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],70:[function(require,module,exports){
+},{}],42:[function(require,module,exports){
 (function (global){
 /*! https://mths.be/punycode v1.4.0 by @mathias */
 ;(function(root) {
@@ -17893,7 +12321,7 @@ process.umask = function() { return 0; };
 }(this));
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],71:[function(require,module,exports){
+},{}],43:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -17979,7 +12407,7 @@ var isArray = Array.isArray || function (xs) {
   return Object.prototype.toString.call(xs) === '[object Array]';
 };
 
-},{}],72:[function(require,module,exports){
+},{}],44:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -18066,13 +12494,13 @@ var objectKeys = Object.keys || function (obj) {
   return res;
 };
 
-},{}],73:[function(require,module,exports){
+},{}],45:[function(require,module,exports){
 'use strict';
 
 exports.decode = exports.parse = require('./decode');
 exports.encode = exports.stringify = require('./encode');
 
-},{"./decode":71,"./encode":72}],74:[function(require,module,exports){
+},{"./decode":43,"./encode":44}],46:[function(require,module,exports){
 //  Ramda v0.19.1
 //  https://github.com/ramda/ramda
 //  (c) 2013-2016 Scott Sauyet, Michael Hurley, and David Chambers
@@ -26520,10 +20948,10 @@ exports.encode = exports.stringify = require('./encode');
 
 }.call(this));
 
-},{}],75:[function(require,module,exports){
+},{}],47:[function(require,module,exports){
 module.exports = require("./lib/_stream_duplex.js")
 
-},{"./lib/_stream_duplex.js":76}],76:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":48}],48:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -26616,7 +21044,7 @@ function forEach (xs, f) {
 }
 
 }).call(this,require('_process'))
-},{"./_stream_readable":78,"./_stream_writable":80,"_process":69,"core-util-is":6,"inherits":52}],77:[function(require,module,exports){
+},{"./_stream_readable":50,"./_stream_writable":52,"_process":41,"core-util-is":6,"inherits":24}],49:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -26664,7 +21092,7 @@ PassThrough.prototype._transform = function(chunk, encoding, cb) {
   cb(null, chunk);
 };
 
-},{"./_stream_transform":79,"core-util-is":6,"inherits":52}],78:[function(require,module,exports){
+},{"./_stream_transform":51,"core-util-is":6,"inherits":24}],50:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -27650,7 +22078,7 @@ function indexOf (xs, x) {
 }
 
 }).call(this,require('_process'))
-},{"_process":69,"buffer":4,"core-util-is":6,"events":50,"inherits":52,"isarray":54,"stream":83,"string_decoder/":94}],79:[function(require,module,exports){
+},{"_process":41,"buffer":4,"core-util-is":6,"events":22,"inherits":24,"isarray":26,"stream":55,"string_decoder/":66}],51:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -27862,7 +22290,7 @@ function done(stream, er) {
   return stream.push(null);
 }
 
-},{"./_stream_duplex":76,"core-util-is":6,"inherits":52}],80:[function(require,module,exports){
+},{"./_stream_duplex":48,"core-util-is":6,"inherits":24}],52:[function(require,module,exports){
 (function (process){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -28252,7 +22680,7 @@ function endWritable(stream, state, cb) {
 }
 
 }).call(this,require('_process'))
-},{"./_stream_duplex":76,"_process":69,"buffer":4,"core-util-is":6,"inherits":52,"stream":83}],81:[function(require,module,exports){
+},{"./_stream_duplex":48,"_process":41,"buffer":4,"core-util-is":6,"inherits":24,"stream":55}],53:[function(require,module,exports){
 var Stream = require('stream'); // hack to fix a circular dependency issue when used with browserify
 exports = module.exports = require('./lib/_stream_readable.js');
 exports.Stream = Stream;
@@ -28262,7 +22690,7 @@ exports.Duplex = require('./lib/_stream_duplex.js');
 exports.Transform = require('./lib/_stream_transform.js');
 exports.PassThrough = require('./lib/_stream_passthrough.js');
 
-},{"./lib/_stream_duplex.js":76,"./lib/_stream_passthrough.js":77,"./lib/_stream_readable.js":78,"./lib/_stream_transform.js":79,"./lib/_stream_writable.js":80,"stream":83}],82:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":48,"./lib/_stream_passthrough.js":49,"./lib/_stream_readable.js":50,"./lib/_stream_transform.js":51,"./lib/_stream_writable.js":52,"stream":55}],54:[function(require,module,exports){
 'use strict'
 
 function ReInterval (callback, interval, args) {
@@ -28312,7 +22740,7 @@ function reInterval () {
 
 module.exports = reInterval;
 
-},{}],83:[function(require,module,exports){
+},{}],55:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -28441,30 +22869,1842 @@ Stream.prototype.pipe = function(dest, options) {
   return dest;
 };
 
-},{"events":50,"inherits":52,"readable-stream/duplex.js":84,"readable-stream/passthrough.js":90,"readable-stream/readable.js":91,"readable-stream/transform.js":92,"readable-stream/writable.js":93}],84:[function(require,module,exports){
-arguments[4][75][0].apply(exports,arguments)
-},{"./lib/_stream_duplex.js":85,"dup":75}],85:[function(require,module,exports){
-arguments[4][43][0].apply(exports,arguments)
-},{"./_stream_readable":87,"./_stream_writable":89,"core-util-is":6,"dup":43,"inherits":52,"process-nextick-args":68}],86:[function(require,module,exports){
-arguments[4][44][0].apply(exports,arguments)
-},{"./_stream_transform":88,"core-util-is":6,"dup":44,"inherits":52}],87:[function(require,module,exports){
-arguments[4][45][0].apply(exports,arguments)
-},{"./_stream_duplex":85,"_process":69,"buffer":4,"core-util-is":6,"dup":45,"events":50,"inherits":52,"isarray":54,"process-nextick-args":68,"string_decoder/":94,"util":3}],88:[function(require,module,exports){
-arguments[4][46][0].apply(exports,arguments)
-},{"./_stream_duplex":85,"core-util-is":6,"dup":46,"inherits":52}],89:[function(require,module,exports){
+},{"events":22,"inherits":24,"readable-stream/duplex.js":56,"readable-stream/passthrough.js":62,"readable-stream/readable.js":63,"readable-stream/transform.js":64,"readable-stream/writable.js":65}],56:[function(require,module,exports){
 arguments[4][47][0].apply(exports,arguments)
-},{"./_stream_duplex":85,"buffer":4,"core-util-is":6,"dup":47,"events":50,"inherits":52,"process-nextick-args":68,"util-deprecate":97}],90:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":57,"dup":47}],57:[function(require,module,exports){
+// a duplex stream is just a stream that is both readable and writable.
+// Since JS doesn't have multiple prototypal inheritance, this class
+// prototypally inherits from Readable, and then parasitically from
+// Writable.
+
+'use strict';
+
+/*<replacement>*/
+var objectKeys = Object.keys || function (obj) {
+  var keys = [];
+  for (var key in obj) keys.push(key);
+  return keys;
+}
+/*</replacement>*/
+
+
+module.exports = Duplex;
+
+/*<replacement>*/
+var processNextTick = require('process-nextick-args');
+/*</replacement>*/
+
+
+
+/*<replacement>*/
+var util = require('core-util-is');
+util.inherits = require('inherits');
+/*</replacement>*/
+
+var Readable = require('./_stream_readable');
+var Writable = require('./_stream_writable');
+
+util.inherits(Duplex, Readable);
+
+var keys = objectKeys(Writable.prototype);
+for (var v = 0; v < keys.length; v++) {
+  var method = keys[v];
+  if (!Duplex.prototype[method])
+    Duplex.prototype[method] = Writable.prototype[method];
+}
+
+function Duplex(options) {
+  if (!(this instanceof Duplex))
+    return new Duplex(options);
+
+  Readable.call(this, options);
+  Writable.call(this, options);
+
+  if (options && options.readable === false)
+    this.readable = false;
+
+  if (options && options.writable === false)
+    this.writable = false;
+
+  this.allowHalfOpen = true;
+  if (options && options.allowHalfOpen === false)
+    this.allowHalfOpen = false;
+
+  this.once('end', onend);
+}
+
+// the no-half-open enforcer
+function onend() {
+  // if we allow half-open state, or if the writable side ended,
+  // then we're ok.
+  if (this.allowHalfOpen || this._writableState.ended)
+    return;
+
+  // no more data can be written.
+  // But allow more writes to happen in this tick.
+  processNextTick(onEndNT, this);
+}
+
+function onEndNT(self) {
+  self.end();
+}
+
+function forEach (xs, f) {
+  for (var i = 0, l = xs.length; i < l; i++) {
+    f(xs[i], i);
+  }
+}
+
+},{"./_stream_readable":59,"./_stream_writable":61,"core-util-is":6,"inherits":24,"process-nextick-args":40}],58:[function(require,module,exports){
+// a passthrough stream.
+// basically just the most minimal sort of Transform stream.
+// Every written chunk gets output as-is.
+
+'use strict';
+
+module.exports = PassThrough;
+
+var Transform = require('./_stream_transform');
+
+/*<replacement>*/
+var util = require('core-util-is');
+util.inherits = require('inherits');
+/*</replacement>*/
+
+util.inherits(PassThrough, Transform);
+
+function PassThrough(options) {
+  if (!(this instanceof PassThrough))
+    return new PassThrough(options);
+
+  Transform.call(this, options);
+}
+
+PassThrough.prototype._transform = function(chunk, encoding, cb) {
+  cb(null, chunk);
+};
+
+},{"./_stream_transform":60,"core-util-is":6,"inherits":24}],59:[function(require,module,exports){
+(function (process){
+'use strict';
+
+module.exports = Readable;
+
+/*<replacement>*/
+var processNextTick = require('process-nextick-args');
+/*</replacement>*/
+
+
+/*<replacement>*/
+var isArray = require('isarray');
+/*</replacement>*/
+
+
+/*<replacement>*/
+var Buffer = require('buffer').Buffer;
+/*</replacement>*/
+
+Readable.ReadableState = ReadableState;
+
+var EE = require('events');
+
+/*<replacement>*/
+var EElistenerCount = function(emitter, type) {
+  return emitter.listeners(type).length;
+};
+/*</replacement>*/
+
+
+
+/*<replacement>*/
+var Stream;
+(function (){try{
+  Stream = require('st' + 'ream');
+}catch(_){}finally{
+  if (!Stream)
+    Stream = require('events').EventEmitter;
+}}())
+/*</replacement>*/
+
+var Buffer = require('buffer').Buffer;
+
+/*<replacement>*/
+var util = require('core-util-is');
+util.inherits = require('inherits');
+/*</replacement>*/
+
+
+
+/*<replacement>*/
+var debugUtil = require('util');
+var debug;
+if (debugUtil && debugUtil.debuglog) {
+  debug = debugUtil.debuglog('stream');
+} else {
+  debug = function () {};
+}
+/*</replacement>*/
+
+var StringDecoder;
+
+util.inherits(Readable, Stream);
+
+var Duplex;
+function ReadableState(options, stream) {
+  Duplex = Duplex || require('./_stream_duplex');
+
+  options = options || {};
+
+  // object stream flag. Used to make read(n) ignore n and to
+  // make all the buffer merging and length checks go away
+  this.objectMode = !!options.objectMode;
+
+  if (stream instanceof Duplex)
+    this.objectMode = this.objectMode || !!options.readableObjectMode;
+
+  // the point at which it stops calling _read() to fill the buffer
+  // Note: 0 is a valid value, means "don't call _read preemptively ever"
+  var hwm = options.highWaterMark;
+  var defaultHwm = this.objectMode ? 16 : 16 * 1024;
+  this.highWaterMark = (hwm || hwm === 0) ? hwm : defaultHwm;
+
+  // cast to ints.
+  this.highWaterMark = ~~this.highWaterMark;
+
+  this.buffer = [];
+  this.length = 0;
+  this.pipes = null;
+  this.pipesCount = 0;
+  this.flowing = null;
+  this.ended = false;
+  this.endEmitted = false;
+  this.reading = false;
+
+  // a flag to be able to tell if the onwrite cb is called immediately,
+  // or on a later tick.  We set this to true at first, because any
+  // actions that shouldn't happen until "later" should generally also
+  // not happen before the first write call.
+  this.sync = true;
+
+  // whenever we return null, then we set a flag to say
+  // that we're awaiting a 'readable' event emission.
+  this.needReadable = false;
+  this.emittedReadable = false;
+  this.readableListening = false;
+
+  // Crypto is kind of old and crusty.  Historically, its default string
+  // encoding is 'binary' so we have to make this configurable.
+  // Everything else in the universe uses 'utf8', though.
+  this.defaultEncoding = options.defaultEncoding || 'utf8';
+
+  // when piping, we only care about 'readable' events that happen
+  // after read()ing all the bytes and not getting any pushback.
+  this.ranOut = false;
+
+  // the number of writers that are awaiting a drain event in .pipe()s
+  this.awaitDrain = 0;
+
+  // if true, a maybeReadMore has been scheduled
+  this.readingMore = false;
+
+  this.decoder = null;
+  this.encoding = null;
+  if (options.encoding) {
+    if (!StringDecoder)
+      StringDecoder = require('string_decoder/').StringDecoder;
+    this.decoder = new StringDecoder(options.encoding);
+    this.encoding = options.encoding;
+  }
+}
+
+var Duplex;
+function Readable(options) {
+  Duplex = Duplex || require('./_stream_duplex');
+
+  if (!(this instanceof Readable))
+    return new Readable(options);
+
+  this._readableState = new ReadableState(options, this);
+
+  // legacy
+  this.readable = true;
+
+  if (options && typeof options.read === 'function')
+    this._read = options.read;
+
+  Stream.call(this);
+}
+
+// Manually shove something into the read() buffer.
+// This returns true if the highWaterMark has not been hit yet,
+// similar to how Writable.write() returns true if you should
+// write() some more.
+Readable.prototype.push = function(chunk, encoding) {
+  var state = this._readableState;
+
+  if (!state.objectMode && typeof chunk === 'string') {
+    encoding = encoding || state.defaultEncoding;
+    if (encoding !== state.encoding) {
+      chunk = new Buffer(chunk, encoding);
+      encoding = '';
+    }
+  }
+
+  return readableAddChunk(this, state, chunk, encoding, false);
+};
+
+// Unshift should *always* be something directly out of read()
+Readable.prototype.unshift = function(chunk) {
+  var state = this._readableState;
+  return readableAddChunk(this, state, chunk, '', true);
+};
+
+Readable.prototype.isPaused = function() {
+  return this._readableState.flowing === false;
+};
+
+function readableAddChunk(stream, state, chunk, encoding, addToFront) {
+  var er = chunkInvalid(state, chunk);
+  if (er) {
+    stream.emit('error', er);
+  } else if (chunk === null) {
+    state.reading = false;
+    onEofChunk(stream, state);
+  } else if (state.objectMode || chunk && chunk.length > 0) {
+    if (state.ended && !addToFront) {
+      var e = new Error('stream.push() after EOF');
+      stream.emit('error', e);
+    } else if (state.endEmitted && addToFront) {
+      var e = new Error('stream.unshift() after end event');
+      stream.emit('error', e);
+    } else {
+      if (state.decoder && !addToFront && !encoding)
+        chunk = state.decoder.write(chunk);
+
+      if (!addToFront)
+        state.reading = false;
+
+      // if we want the data now, just emit it.
+      if (state.flowing && state.length === 0 && !state.sync) {
+        stream.emit('data', chunk);
+        stream.read(0);
+      } else {
+        // update the buffer info.
+        state.length += state.objectMode ? 1 : chunk.length;
+        if (addToFront)
+          state.buffer.unshift(chunk);
+        else
+          state.buffer.push(chunk);
+
+        if (state.needReadable)
+          emitReadable(stream);
+      }
+
+      maybeReadMore(stream, state);
+    }
+  } else if (!addToFront) {
+    state.reading = false;
+  }
+
+  return needMoreData(state);
+}
+
+
+// if it's past the high water mark, we can push in some more.
+// Also, if we have no data yet, we can stand some
+// more bytes.  This is to work around cases where hwm=0,
+// such as the repl.  Also, if the push() triggered a
+// readable event, and the user called read(largeNumber) such that
+// needReadable was set, then we ought to push more, so that another
+// 'readable' event will be triggered.
+function needMoreData(state) {
+  return !state.ended &&
+         (state.needReadable ||
+          state.length < state.highWaterMark ||
+          state.length === 0);
+}
+
+// backwards compatibility.
+Readable.prototype.setEncoding = function(enc) {
+  if (!StringDecoder)
+    StringDecoder = require('string_decoder/').StringDecoder;
+  this._readableState.decoder = new StringDecoder(enc);
+  this._readableState.encoding = enc;
+  return this;
+};
+
+// Don't raise the hwm > 8MB
+var MAX_HWM = 0x800000;
+function computeNewHighWaterMark(n) {
+  if (n >= MAX_HWM) {
+    n = MAX_HWM;
+  } else {
+    // Get the next highest power of 2
+    n--;
+    n |= n >>> 1;
+    n |= n >>> 2;
+    n |= n >>> 4;
+    n |= n >>> 8;
+    n |= n >>> 16;
+    n++;
+  }
+  return n;
+}
+
+function howMuchToRead(n, state) {
+  if (state.length === 0 && state.ended)
+    return 0;
+
+  if (state.objectMode)
+    return n === 0 ? 0 : 1;
+
+  if (n === null || isNaN(n)) {
+    // only flow one buffer at a time
+    if (state.flowing && state.buffer.length)
+      return state.buffer[0].length;
+    else
+      return state.length;
+  }
+
+  if (n <= 0)
+    return 0;
+
+  // If we're asking for more than the target buffer level,
+  // then raise the water mark.  Bump up to the next highest
+  // power of 2, to prevent increasing it excessively in tiny
+  // amounts.
+  if (n > state.highWaterMark)
+    state.highWaterMark = computeNewHighWaterMark(n);
+
+  // don't have that much.  return null, unless we've ended.
+  if (n > state.length) {
+    if (!state.ended) {
+      state.needReadable = true;
+      return 0;
+    } else {
+      return state.length;
+    }
+  }
+
+  return n;
+}
+
+// you can override either this method, or the async _read(n) below.
+Readable.prototype.read = function(n) {
+  debug('read', n);
+  var state = this._readableState;
+  var nOrig = n;
+
+  if (typeof n !== 'number' || n > 0)
+    state.emittedReadable = false;
+
+  // if we're doing read(0) to trigger a readable event, but we
+  // already have a bunch of data in the buffer, then just trigger
+  // the 'readable' event and move on.
+  if (n === 0 &&
+      state.needReadable &&
+      (state.length >= state.highWaterMark || state.ended)) {
+    debug('read: emitReadable', state.length, state.ended);
+    if (state.length === 0 && state.ended)
+      endReadable(this);
+    else
+      emitReadable(this);
+    return null;
+  }
+
+  n = howMuchToRead(n, state);
+
+  // if we've ended, and we're now clear, then finish it up.
+  if (n === 0 && state.ended) {
+    if (state.length === 0)
+      endReadable(this);
+    return null;
+  }
+
+  // All the actual chunk generation logic needs to be
+  // *below* the call to _read.  The reason is that in certain
+  // synthetic stream cases, such as passthrough streams, _read
+  // may be a completely synchronous operation which may change
+  // the state of the read buffer, providing enough data when
+  // before there was *not* enough.
+  //
+  // So, the steps are:
+  // 1. Figure out what the state of things will be after we do
+  // a read from the buffer.
+  //
+  // 2. If that resulting state will trigger a _read, then call _read.
+  // Note that this may be asynchronous, or synchronous.  Yes, it is
+  // deeply ugly to write APIs this way, but that still doesn't mean
+  // that the Readable class should behave improperly, as streams are
+  // designed to be sync/async agnostic.
+  // Take note if the _read call is sync or async (ie, if the read call
+  // has returned yet), so that we know whether or not it's safe to emit
+  // 'readable' etc.
+  //
+  // 3. Actually pull the requested chunks out of the buffer and return.
+
+  // if we need a readable event, then we need to do some reading.
+  var doRead = state.needReadable;
+  debug('need readable', doRead);
+
+  // if we currently have less than the highWaterMark, then also read some
+  if (state.length === 0 || state.length - n < state.highWaterMark) {
+    doRead = true;
+    debug('length less than watermark', doRead);
+  }
+
+  // however, if we've ended, then there's no point, and if we're already
+  // reading, then it's unnecessary.
+  if (state.ended || state.reading) {
+    doRead = false;
+    debug('reading or ended', doRead);
+  }
+
+  if (doRead) {
+    debug('do read');
+    state.reading = true;
+    state.sync = true;
+    // if the length is currently zero, then we *need* a readable event.
+    if (state.length === 0)
+      state.needReadable = true;
+    // call internal read method
+    this._read(state.highWaterMark);
+    state.sync = false;
+  }
+
+  // If _read pushed data synchronously, then `reading` will be false,
+  // and we need to re-evaluate how much data we can return to the user.
+  if (doRead && !state.reading)
+    n = howMuchToRead(nOrig, state);
+
+  var ret;
+  if (n > 0)
+    ret = fromList(n, state);
+  else
+    ret = null;
+
+  if (ret === null) {
+    state.needReadable = true;
+    n = 0;
+  }
+
+  state.length -= n;
+
+  // If we have nothing in the buffer, then we want to know
+  // as soon as we *do* get something into the buffer.
+  if (state.length === 0 && !state.ended)
+    state.needReadable = true;
+
+  // If we tried to read() past the EOF, then emit end on the next tick.
+  if (nOrig !== n && state.ended && state.length === 0)
+    endReadable(this);
+
+  if (ret !== null)
+    this.emit('data', ret);
+
+  return ret;
+};
+
+function chunkInvalid(state, chunk) {
+  var er = null;
+  if (!(Buffer.isBuffer(chunk)) &&
+      typeof chunk !== 'string' &&
+      chunk !== null &&
+      chunk !== undefined &&
+      !state.objectMode) {
+    er = new TypeError('Invalid non-string/buffer chunk');
+  }
+  return er;
+}
+
+
+function onEofChunk(stream, state) {
+  if (state.ended) return;
+  if (state.decoder) {
+    var chunk = state.decoder.end();
+    if (chunk && chunk.length) {
+      state.buffer.push(chunk);
+      state.length += state.objectMode ? 1 : chunk.length;
+    }
+  }
+  state.ended = true;
+
+  // emit 'readable' now to make sure it gets picked up.
+  emitReadable(stream);
+}
+
+// Don't emit readable right away in sync mode, because this can trigger
+// another read() call => stack overflow.  This way, it might trigger
+// a nextTick recursion warning, but that's not so bad.
+function emitReadable(stream) {
+  var state = stream._readableState;
+  state.needReadable = false;
+  if (!state.emittedReadable) {
+    debug('emitReadable', state.flowing);
+    state.emittedReadable = true;
+    if (state.sync)
+      processNextTick(emitReadable_, stream);
+    else
+      emitReadable_(stream);
+  }
+}
+
+function emitReadable_(stream) {
+  debug('emit readable');
+  stream.emit('readable');
+  flow(stream);
+}
+
+
+// at this point, the user has presumably seen the 'readable' event,
+// and called read() to consume some data.  that may have triggered
+// in turn another _read(n) call, in which case reading = true if
+// it's in progress.
+// However, if we're not ended, or reading, and the length < hwm,
+// then go ahead and try to read some more preemptively.
+function maybeReadMore(stream, state) {
+  if (!state.readingMore) {
+    state.readingMore = true;
+    processNextTick(maybeReadMore_, stream, state);
+  }
+}
+
+function maybeReadMore_(stream, state) {
+  var len = state.length;
+  while (!state.reading && !state.flowing && !state.ended &&
+         state.length < state.highWaterMark) {
+    debug('maybeReadMore read 0');
+    stream.read(0);
+    if (len === state.length)
+      // didn't get any data, stop spinning.
+      break;
+    else
+      len = state.length;
+  }
+  state.readingMore = false;
+}
+
+// abstract method.  to be overridden in specific implementation classes.
+// call cb(er, data) where data is <= n in length.
+// for virtual (non-string, non-buffer) streams, "length" is somewhat
+// arbitrary, and perhaps not very meaningful.
+Readable.prototype._read = function(n) {
+  this.emit('error', new Error('not implemented'));
+};
+
+Readable.prototype.pipe = function(dest, pipeOpts) {
+  var src = this;
+  var state = this._readableState;
+
+  switch (state.pipesCount) {
+    case 0:
+      state.pipes = dest;
+      break;
+    case 1:
+      state.pipes = [state.pipes, dest];
+      break;
+    default:
+      state.pipes.push(dest);
+      break;
+  }
+  state.pipesCount += 1;
+  debug('pipe count=%d opts=%j', state.pipesCount, pipeOpts);
+
+  var doEnd = (!pipeOpts || pipeOpts.end !== false) &&
+              dest !== process.stdout &&
+              dest !== process.stderr;
+
+  var endFn = doEnd ? onend : cleanup;
+  if (state.endEmitted)
+    processNextTick(endFn);
+  else
+    src.once('end', endFn);
+
+  dest.on('unpipe', onunpipe);
+  function onunpipe(readable) {
+    debug('onunpipe');
+    if (readable === src) {
+      cleanup();
+    }
+  }
+
+  function onend() {
+    debug('onend');
+    dest.end();
+  }
+
+  // when the dest drains, it reduces the awaitDrain counter
+  // on the source.  This would be more elegant with a .once()
+  // handler in flow(), but adding and removing repeatedly is
+  // too slow.
+  var ondrain = pipeOnDrain(src);
+  dest.on('drain', ondrain);
+
+  var cleanedUp = false;
+  function cleanup() {
+    debug('cleanup');
+    // cleanup event handlers once the pipe is broken
+    dest.removeListener('close', onclose);
+    dest.removeListener('finish', onfinish);
+    dest.removeListener('drain', ondrain);
+    dest.removeListener('error', onerror);
+    dest.removeListener('unpipe', onunpipe);
+    src.removeListener('end', onend);
+    src.removeListener('end', cleanup);
+    src.removeListener('data', ondata);
+
+    cleanedUp = true;
+
+    // if the reader is waiting for a drain event from this
+    // specific writer, then it would cause it to never start
+    // flowing again.
+    // So, if this is awaiting a drain, then we just call it now.
+    // If we don't know, then assume that we are waiting for one.
+    if (state.awaitDrain &&
+        (!dest._writableState || dest._writableState.needDrain))
+      ondrain();
+  }
+
+  src.on('data', ondata);
+  function ondata(chunk) {
+    debug('ondata');
+    var ret = dest.write(chunk);
+    if (false === ret) {
+      // If the user unpiped during `dest.write()`, it is possible
+      // to get stuck in a permanently paused state if that write
+      // also returned false.
+      if (state.pipesCount === 1 &&
+          state.pipes[0] === dest &&
+          src.listenerCount('data') === 1 &&
+          !cleanedUp) {
+        debug('false write response, pause', src._readableState.awaitDrain);
+        src._readableState.awaitDrain++;
+      }
+      src.pause();
+    }
+  }
+
+  // if the dest has an error, then stop piping into it.
+  // however, don't suppress the throwing behavior for this.
+  function onerror(er) {
+    debug('onerror', er);
+    unpipe();
+    dest.removeListener('error', onerror);
+    if (EElistenerCount(dest, 'error') === 0)
+      dest.emit('error', er);
+  }
+  // This is a brutally ugly hack to make sure that our error handler
+  // is attached before any userland ones.  NEVER DO THIS.
+  if (!dest._events || !dest._events.error)
+    dest.on('error', onerror);
+  else if (isArray(dest._events.error))
+    dest._events.error.unshift(onerror);
+  else
+    dest._events.error = [onerror, dest._events.error];
+
+
+  // Both close and finish should trigger unpipe, but only once.
+  function onclose() {
+    dest.removeListener('finish', onfinish);
+    unpipe();
+  }
+  dest.once('close', onclose);
+  function onfinish() {
+    debug('onfinish');
+    dest.removeListener('close', onclose);
+    unpipe();
+  }
+  dest.once('finish', onfinish);
+
+  function unpipe() {
+    debug('unpipe');
+    src.unpipe(dest);
+  }
+
+  // tell the dest that it's being piped to
+  dest.emit('pipe', src);
+
+  // start the flow if it hasn't been started already.
+  if (!state.flowing) {
+    debug('pipe resume');
+    src.resume();
+  }
+
+  return dest;
+};
+
+function pipeOnDrain(src) {
+  return function() {
+    var state = src._readableState;
+    debug('pipeOnDrain', state.awaitDrain);
+    if (state.awaitDrain)
+      state.awaitDrain--;
+    if (state.awaitDrain === 0 && EElistenerCount(src, 'data')) {
+      state.flowing = true;
+      flow(src);
+    }
+  };
+}
+
+
+Readable.prototype.unpipe = function(dest) {
+  var state = this._readableState;
+
+  // if we're not piping anywhere, then do nothing.
+  if (state.pipesCount === 0)
+    return this;
+
+  // just one destination.  most common case.
+  if (state.pipesCount === 1) {
+    // passed in one, but it's not the right one.
+    if (dest && dest !== state.pipes)
+      return this;
+
+    if (!dest)
+      dest = state.pipes;
+
+    // got a match.
+    state.pipes = null;
+    state.pipesCount = 0;
+    state.flowing = false;
+    if (dest)
+      dest.emit('unpipe', this);
+    return this;
+  }
+
+  // slow case. multiple pipe destinations.
+
+  if (!dest) {
+    // remove all.
+    var dests = state.pipes;
+    var len = state.pipesCount;
+    state.pipes = null;
+    state.pipesCount = 0;
+    state.flowing = false;
+
+    for (var i = 0; i < len; i++)
+      dests[i].emit('unpipe', this);
+    return this;
+  }
+
+  // try to find the right one.
+  var i = indexOf(state.pipes, dest);
+  if (i === -1)
+    return this;
+
+  state.pipes.splice(i, 1);
+  state.pipesCount -= 1;
+  if (state.pipesCount === 1)
+    state.pipes = state.pipes[0];
+
+  dest.emit('unpipe', this);
+
+  return this;
+};
+
+// set up data events if they are asked for
+// Ensure readable listeners eventually get something
+Readable.prototype.on = function(ev, fn) {
+  var res = Stream.prototype.on.call(this, ev, fn);
+
+  // If listening to data, and it has not explicitly been paused,
+  // then call resume to start the flow of data on the next tick.
+  if (ev === 'data' && false !== this._readableState.flowing) {
+    this.resume();
+  }
+
+  if (ev === 'readable' && this.readable) {
+    var state = this._readableState;
+    if (!state.readableListening) {
+      state.readableListening = true;
+      state.emittedReadable = false;
+      state.needReadable = true;
+      if (!state.reading) {
+        processNextTick(nReadingNextTick, this);
+      } else if (state.length) {
+        emitReadable(this, state);
+      }
+    }
+  }
+
+  return res;
+};
+Readable.prototype.addListener = Readable.prototype.on;
+
+function nReadingNextTick(self) {
+  debug('readable nexttick read 0');
+  self.read(0);
+}
+
+// pause() and resume() are remnants of the legacy readable stream API
+// If the user uses them, then switch into old mode.
+Readable.prototype.resume = function() {
+  var state = this._readableState;
+  if (!state.flowing) {
+    debug('resume');
+    state.flowing = true;
+    resume(this, state);
+  }
+  return this;
+};
+
+function resume(stream, state) {
+  if (!state.resumeScheduled) {
+    state.resumeScheduled = true;
+    processNextTick(resume_, stream, state);
+  }
+}
+
+function resume_(stream, state) {
+  if (!state.reading) {
+    debug('resume read 0');
+    stream.read(0);
+  }
+
+  state.resumeScheduled = false;
+  stream.emit('resume');
+  flow(stream);
+  if (state.flowing && !state.reading)
+    stream.read(0);
+}
+
+Readable.prototype.pause = function() {
+  debug('call pause flowing=%j', this._readableState.flowing);
+  if (false !== this._readableState.flowing) {
+    debug('pause');
+    this._readableState.flowing = false;
+    this.emit('pause');
+  }
+  return this;
+};
+
+function flow(stream) {
+  var state = stream._readableState;
+  debug('flow', state.flowing);
+  if (state.flowing) {
+    do {
+      var chunk = stream.read();
+    } while (null !== chunk && state.flowing);
+  }
+}
+
+// wrap an old-style stream as the async data source.
+// This is *not* part of the readable stream interface.
+// It is an ugly unfortunate mess of history.
+Readable.prototype.wrap = function(stream) {
+  var state = this._readableState;
+  var paused = false;
+
+  var self = this;
+  stream.on('end', function() {
+    debug('wrapped end');
+    if (state.decoder && !state.ended) {
+      var chunk = state.decoder.end();
+      if (chunk && chunk.length)
+        self.push(chunk);
+    }
+
+    self.push(null);
+  });
+
+  stream.on('data', function(chunk) {
+    debug('wrapped data');
+    if (state.decoder)
+      chunk = state.decoder.write(chunk);
+
+    // don't skip over falsy values in objectMode
+    if (state.objectMode && (chunk === null || chunk === undefined))
+      return;
+    else if (!state.objectMode && (!chunk || !chunk.length))
+      return;
+
+    var ret = self.push(chunk);
+    if (!ret) {
+      paused = true;
+      stream.pause();
+    }
+  });
+
+  // proxy all the other methods.
+  // important when wrapping filters and duplexes.
+  for (var i in stream) {
+    if (this[i] === undefined && typeof stream[i] === 'function') {
+      this[i] = function(method) { return function() {
+        return stream[method].apply(stream, arguments);
+      }; }(i);
+    }
+  }
+
+  // proxy certain important events.
+  var events = ['error', 'close', 'destroy', 'pause', 'resume'];
+  forEach(events, function(ev) {
+    stream.on(ev, self.emit.bind(self, ev));
+  });
+
+  // when we try to consume some more bytes, simply unpause the
+  // underlying stream.
+  self._read = function(n) {
+    debug('wrapped _read', n);
+    if (paused) {
+      paused = false;
+      stream.resume();
+    }
+  };
+
+  return self;
+};
+
+
+// exposed for testing purposes only.
+Readable._fromList = fromList;
+
+// Pluck off n bytes from an array of buffers.
+// Length is the combined lengths of all the buffers in the list.
+function fromList(n, state) {
+  var list = state.buffer;
+  var length = state.length;
+  var stringMode = !!state.decoder;
+  var objectMode = !!state.objectMode;
+  var ret;
+
+  // nothing in the list, definitely empty.
+  if (list.length === 0)
+    return null;
+
+  if (length === 0)
+    ret = null;
+  else if (objectMode)
+    ret = list.shift();
+  else if (!n || n >= length) {
+    // read it all, truncate the array.
+    if (stringMode)
+      ret = list.join('');
+    else if (list.length === 1)
+      ret = list[0];
+    else
+      ret = Buffer.concat(list, length);
+    list.length = 0;
+  } else {
+    // read just some of it.
+    if (n < list[0].length) {
+      // just take a part of the first list item.
+      // slice is the same for buffers and strings.
+      var buf = list[0];
+      ret = buf.slice(0, n);
+      list[0] = buf.slice(n);
+    } else if (n === list[0].length) {
+      // first list is a perfect match
+      ret = list.shift();
+    } else {
+      // complex case.
+      // we have enough to cover it, but it spans past the first buffer.
+      if (stringMode)
+        ret = '';
+      else
+        ret = new Buffer(n);
+
+      var c = 0;
+      for (var i = 0, l = list.length; i < l && c < n; i++) {
+        var buf = list[0];
+        var cpy = Math.min(n - c, buf.length);
+
+        if (stringMode)
+          ret += buf.slice(0, cpy);
+        else
+          buf.copy(ret, c, 0, cpy);
+
+        if (cpy < buf.length)
+          list[0] = buf.slice(cpy);
+        else
+          list.shift();
+
+        c += cpy;
+      }
+    }
+  }
+
+  return ret;
+}
+
+function endReadable(stream) {
+  var state = stream._readableState;
+
+  // If we get here before consuming all the bytes, then that is a
+  // bug in node.  Should never happen.
+  if (state.length > 0)
+    throw new Error('endReadable called on non-empty stream');
+
+  if (!state.endEmitted) {
+    state.ended = true;
+    processNextTick(endReadableNT, state, stream);
+  }
+}
+
+function endReadableNT(state, stream) {
+  // Check that we didn't get one last unshift.
+  if (!state.endEmitted && state.length === 0) {
+    state.endEmitted = true;
+    stream.readable = false;
+    stream.emit('end');
+  }
+}
+
+function forEach (xs, f) {
+  for (var i = 0, l = xs.length; i < l; i++) {
+    f(xs[i], i);
+  }
+}
+
+function indexOf (xs, x) {
+  for (var i = 0, l = xs.length; i < l; i++) {
+    if (xs[i] === x) return i;
+  }
+  return -1;
+}
+
+}).call(this,require('_process'))
+},{"./_stream_duplex":57,"_process":41,"buffer":4,"core-util-is":6,"events":22,"inherits":24,"isarray":26,"process-nextick-args":40,"string_decoder/":66,"util":3}],60:[function(require,module,exports){
+// a transform stream is a readable/writable stream where you do
+// something with the data.  Sometimes it's called a "filter",
+// but that's not a great name for it, since that implies a thing where
+// some bits pass through, and others are simply ignored.  (That would
+// be a valid example of a transform, of course.)
+//
+// While the output is causally related to the input, it's not a
+// necessarily symmetric or synchronous transformation.  For example,
+// a zlib stream might take multiple plain-text writes(), and then
+// emit a single compressed chunk some time in the future.
+//
+// Here's how this works:
+//
+// The Transform stream has all the aspects of the readable and writable
+// stream classes.  When you write(chunk), that calls _write(chunk,cb)
+// internally, and returns false if there's a lot of pending writes
+// buffered up.  When you call read(), that calls _read(n) until
+// there's enough pending readable data buffered up.
+//
+// In a transform stream, the written data is placed in a buffer.  When
+// _read(n) is called, it transforms the queued up data, calling the
+// buffered _write cb's as it consumes chunks.  If consuming a single
+// written chunk would result in multiple output chunks, then the first
+// outputted bit calls the readcb, and subsequent chunks just go into
+// the read buffer, and will cause it to emit 'readable' if necessary.
+//
+// This way, back-pressure is actually determined by the reading side,
+// since _read has to be called to start processing a new chunk.  However,
+// a pathological inflate type of transform can cause excessive buffering
+// here.  For example, imagine a stream where every byte of input is
+// interpreted as an integer from 0-255, and then results in that many
+// bytes of output.  Writing the 4 bytes {ff,ff,ff,ff} would result in
+// 1kb of data being output.  In this case, you could write a very small
+// amount of input, and end up with a very large amount of output.  In
+// such a pathological inflating mechanism, there'd be no way to tell
+// the system to stop doing the transform.  A single 4MB write could
+// cause the system to run out of memory.
+//
+// However, even in such a pathological case, only a single written chunk
+// would be consumed, and then the rest would wait (un-transformed) until
+// the results of the previous transformed chunk were consumed.
+
+'use strict';
+
+module.exports = Transform;
+
+var Duplex = require('./_stream_duplex');
+
+/*<replacement>*/
+var util = require('core-util-is');
+util.inherits = require('inherits');
+/*</replacement>*/
+
+util.inherits(Transform, Duplex);
+
+
+function TransformState(stream) {
+  this.afterTransform = function(er, data) {
+    return afterTransform(stream, er, data);
+  };
+
+  this.needTransform = false;
+  this.transforming = false;
+  this.writecb = null;
+  this.writechunk = null;
+}
+
+function afterTransform(stream, er, data) {
+  var ts = stream._transformState;
+  ts.transforming = false;
+
+  var cb = ts.writecb;
+
+  if (!cb)
+    return stream.emit('error', new Error('no writecb in Transform class'));
+
+  ts.writechunk = null;
+  ts.writecb = null;
+
+  if (data !== null && data !== undefined)
+    stream.push(data);
+
+  if (cb)
+    cb(er);
+
+  var rs = stream._readableState;
+  rs.reading = false;
+  if (rs.needReadable || rs.length < rs.highWaterMark) {
+    stream._read(rs.highWaterMark);
+  }
+}
+
+
+function Transform(options) {
+  if (!(this instanceof Transform))
+    return new Transform(options);
+
+  Duplex.call(this, options);
+
+  this._transformState = new TransformState(this);
+
+  // when the writable side finishes, then flush out anything remaining.
+  var stream = this;
+
+  // start out asking for a readable event once data is transformed.
+  this._readableState.needReadable = true;
+
+  // we have implemented the _read method, and done the other things
+  // that Readable wants before the first _read call, so unset the
+  // sync guard flag.
+  this._readableState.sync = false;
+
+  if (options) {
+    if (typeof options.transform === 'function')
+      this._transform = options.transform;
+
+    if (typeof options.flush === 'function')
+      this._flush = options.flush;
+  }
+
+  this.once('prefinish', function() {
+    if (typeof this._flush === 'function')
+      this._flush(function(er) {
+        done(stream, er);
+      });
+    else
+      done(stream);
+  });
+}
+
+Transform.prototype.push = function(chunk, encoding) {
+  this._transformState.needTransform = false;
+  return Duplex.prototype.push.call(this, chunk, encoding);
+};
+
+// This is the part where you do stuff!
+// override this function in implementation classes.
+// 'chunk' is an input chunk.
+//
+// Call `push(newChunk)` to pass along transformed output
+// to the readable side.  You may call 'push' zero or more times.
+//
+// Call `cb(err)` when you are done with this chunk.  If you pass
+// an error, then that'll put the hurt on the whole operation.  If you
+// never call cb(), then you'll never get another chunk.
+Transform.prototype._transform = function(chunk, encoding, cb) {
+  throw new Error('not implemented');
+};
+
+Transform.prototype._write = function(chunk, encoding, cb) {
+  var ts = this._transformState;
+  ts.writecb = cb;
+  ts.writechunk = chunk;
+  ts.writeencoding = encoding;
+  if (!ts.transforming) {
+    var rs = this._readableState;
+    if (ts.needTransform ||
+        rs.needReadable ||
+        rs.length < rs.highWaterMark)
+      this._read(rs.highWaterMark);
+  }
+};
+
+// Doesn't matter what the args are here.
+// _transform does all the work.
+// That we got here means that the readable side wants more data.
+Transform.prototype._read = function(n) {
+  var ts = this._transformState;
+
+  if (ts.writechunk !== null && ts.writecb && !ts.transforming) {
+    ts.transforming = true;
+    this._transform(ts.writechunk, ts.writeencoding, ts.afterTransform);
+  } else {
+    // mark that we need a transform, so that any data that comes in
+    // will get processed, now that we've asked for it.
+    ts.needTransform = true;
+  }
+};
+
+
+function done(stream, er) {
+  if (er)
+    return stream.emit('error', er);
+
+  // if there's nothing in the write buffer, then that means
+  // that nothing more will ever be provided
+  var ws = stream._writableState;
+  var ts = stream._transformState;
+
+  if (ws.length)
+    throw new Error('calling transform done when ws.length != 0');
+
+  if (ts.transforming)
+    throw new Error('calling transform done when still transforming');
+
+  return stream.push(null);
+}
+
+},{"./_stream_duplex":57,"core-util-is":6,"inherits":24}],61:[function(require,module,exports){
+// A bit simpler than readable streams.
+// Implement an async ._write(chunk, encoding, cb), and it'll handle all
+// the drain event emission and buffering.
+
+'use strict';
+
+module.exports = Writable;
+
+/*<replacement>*/
+var processNextTick = require('process-nextick-args');
+/*</replacement>*/
+
+
+/*<replacement>*/
+var Buffer = require('buffer').Buffer;
+/*</replacement>*/
+
+Writable.WritableState = WritableState;
+
+
+/*<replacement>*/
+var util = require('core-util-is');
+util.inherits = require('inherits');
+/*</replacement>*/
+
+
+/*<replacement>*/
+var internalUtil = {
+  deprecate: require('util-deprecate')
+};
+/*</replacement>*/
+
+
+
+/*<replacement>*/
+var Stream;
+(function (){try{
+  Stream = require('st' + 'ream');
+}catch(_){}finally{
+  if (!Stream)
+    Stream = require('events').EventEmitter;
+}}())
+/*</replacement>*/
+
+var Buffer = require('buffer').Buffer;
+
+util.inherits(Writable, Stream);
+
+function nop() {}
+
+function WriteReq(chunk, encoding, cb) {
+  this.chunk = chunk;
+  this.encoding = encoding;
+  this.callback = cb;
+  this.next = null;
+}
+
+var Duplex;
+function WritableState(options, stream) {
+  Duplex = Duplex || require('./_stream_duplex');
+
+  options = options || {};
+
+  // object stream flag to indicate whether or not this stream
+  // contains buffers or objects.
+  this.objectMode = !!options.objectMode;
+
+  if (stream instanceof Duplex)
+    this.objectMode = this.objectMode || !!options.writableObjectMode;
+
+  // the point at which write() starts returning false
+  // Note: 0 is a valid value, means that we always return false if
+  // the entire buffer is not flushed immediately on write()
+  var hwm = options.highWaterMark;
+  var defaultHwm = this.objectMode ? 16 : 16 * 1024;
+  this.highWaterMark = (hwm || hwm === 0) ? hwm : defaultHwm;
+
+  // cast to ints.
+  this.highWaterMark = ~~this.highWaterMark;
+
+  this.needDrain = false;
+  // at the start of calling end()
+  this.ending = false;
+  // when end() has been called, and returned
+  this.ended = false;
+  // when 'finish' is emitted
+  this.finished = false;
+
+  // should we decode strings into buffers before passing to _write?
+  // this is here so that some node-core streams can optimize string
+  // handling at a lower level.
+  var noDecode = options.decodeStrings === false;
+  this.decodeStrings = !noDecode;
+
+  // Crypto is kind of old and crusty.  Historically, its default string
+  // encoding is 'binary' so we have to make this configurable.
+  // Everything else in the universe uses 'utf8', though.
+  this.defaultEncoding = options.defaultEncoding || 'utf8';
+
+  // not an actual buffer we keep track of, but a measurement
+  // of how much we're waiting to get pushed to some underlying
+  // socket or file.
+  this.length = 0;
+
+  // a flag to see when we're in the middle of a write.
+  this.writing = false;
+
+  // when true all writes will be buffered until .uncork() call
+  this.corked = 0;
+
+  // a flag to be able to tell if the onwrite cb is called immediately,
+  // or on a later tick.  We set this to true at first, because any
+  // actions that shouldn't happen until "later" should generally also
+  // not happen before the first write call.
+  this.sync = true;
+
+  // a flag to know if we're processing previously buffered items, which
+  // may call the _write() callback in the same tick, so that we don't
+  // end up in an overlapped onwrite situation.
+  this.bufferProcessing = false;
+
+  // the callback that's passed to _write(chunk,cb)
+  this.onwrite = function(er) {
+    onwrite(stream, er);
+  };
+
+  // the callback that the user supplies to write(chunk,encoding,cb)
+  this.writecb = null;
+
+  // the amount that is being written when _write is called.
+  this.writelen = 0;
+
+  this.bufferedRequest = null;
+  this.lastBufferedRequest = null;
+
+  // number of pending user-supplied write callbacks
+  // this must be 0 before 'finish' can be emitted
+  this.pendingcb = 0;
+
+  // emit prefinish if the only thing we're waiting for is _write cbs
+  // This is relevant for synchronous Transform streams
+  this.prefinished = false;
+
+  // True if the error was already emitted and should not be thrown again
+  this.errorEmitted = false;
+}
+
+WritableState.prototype.getBuffer = function writableStateGetBuffer() {
+  var current = this.bufferedRequest;
+  var out = [];
+  while (current) {
+    out.push(current);
+    current = current.next;
+  }
+  return out;
+};
+
+(function (){try {
+Object.defineProperty(WritableState.prototype, 'buffer', {
+  get: internalUtil.deprecate(function() {
+    return this.getBuffer();
+  }, '_writableState.buffer is deprecated. Use _writableState.getBuffer ' +
+     'instead.')
+});
+}catch(_){}}());
+
+
+var Duplex;
+function Writable(options) {
+  Duplex = Duplex || require('./_stream_duplex');
+
+  // Writable ctor is applied to Duplexes, though they're not
+  // instanceof Writable, they're instanceof Readable.
+  if (!(this instanceof Writable) && !(this instanceof Duplex))
+    return new Writable(options);
+
+  this._writableState = new WritableState(options, this);
+
+  // legacy.
+  this.writable = true;
+
+  if (options) {
+    if (typeof options.write === 'function')
+      this._write = options.write;
+
+    if (typeof options.writev === 'function')
+      this._writev = options.writev;
+  }
+
+  Stream.call(this);
+}
+
+// Otherwise people can pipe Writable streams, which is just wrong.
+Writable.prototype.pipe = function() {
+  this.emit('error', new Error('Cannot pipe. Not readable.'));
+};
+
+
+function writeAfterEnd(stream, cb) {
+  var er = new Error('write after end');
+  // TODO: defer error events consistently everywhere, not just the cb
+  stream.emit('error', er);
+  processNextTick(cb, er);
+}
+
+// If we get something that is not a buffer, string, null, or undefined,
+// and we're not in objectMode, then that's an error.
+// Otherwise stream chunks are all considered to be of length=1, and the
+// watermarks determine how many objects to keep in the buffer, rather than
+// how many bytes or characters.
+function validChunk(stream, state, chunk, cb) {
+  var valid = true;
+
+  if (!(Buffer.isBuffer(chunk)) &&
+      typeof chunk !== 'string' &&
+      chunk !== null &&
+      chunk !== undefined &&
+      !state.objectMode) {
+    var er = new TypeError('Invalid non-string/buffer chunk');
+    stream.emit('error', er);
+    processNextTick(cb, er);
+    valid = false;
+  }
+  return valid;
+}
+
+Writable.prototype.write = function(chunk, encoding, cb) {
+  var state = this._writableState;
+  var ret = false;
+
+  if (typeof encoding === 'function') {
+    cb = encoding;
+    encoding = null;
+  }
+
+  if (Buffer.isBuffer(chunk))
+    encoding = 'buffer';
+  else if (!encoding)
+    encoding = state.defaultEncoding;
+
+  if (typeof cb !== 'function')
+    cb = nop;
+
+  if (state.ended)
+    writeAfterEnd(this, cb);
+  else if (validChunk(this, state, chunk, cb)) {
+    state.pendingcb++;
+    ret = writeOrBuffer(this, state, chunk, encoding, cb);
+  }
+
+  return ret;
+};
+
+Writable.prototype.cork = function() {
+  var state = this._writableState;
+
+  state.corked++;
+};
+
+Writable.prototype.uncork = function() {
+  var state = this._writableState;
+
+  if (state.corked) {
+    state.corked--;
+
+    if (!state.writing &&
+        !state.corked &&
+        !state.finished &&
+        !state.bufferProcessing &&
+        state.bufferedRequest)
+      clearBuffer(this, state);
+  }
+};
+
+Writable.prototype.setDefaultEncoding = function setDefaultEncoding(encoding) {
+  // node::ParseEncoding() requires lower case.
+  if (typeof encoding === 'string')
+    encoding = encoding.toLowerCase();
+  if (!(['hex', 'utf8', 'utf-8', 'ascii', 'binary', 'base64',
+'ucs2', 'ucs-2','utf16le', 'utf-16le', 'raw']
+.indexOf((encoding + '').toLowerCase()) > -1))
+    throw new TypeError('Unknown encoding: ' + encoding);
+  this._writableState.defaultEncoding = encoding;
+};
+
+function decodeChunk(state, chunk, encoding) {
+  if (!state.objectMode &&
+      state.decodeStrings !== false &&
+      typeof chunk === 'string') {
+    chunk = new Buffer(chunk, encoding);
+  }
+  return chunk;
+}
+
+// if we're already writing something, then just put this
+// in the queue, and wait our turn.  Otherwise, call _write
+// If we return false, then we need a drain event, so set that flag.
+function writeOrBuffer(stream, state, chunk, encoding, cb) {
+  chunk = decodeChunk(state, chunk, encoding);
+
+  if (Buffer.isBuffer(chunk))
+    encoding = 'buffer';
+  var len = state.objectMode ? 1 : chunk.length;
+
+  state.length += len;
+
+  var ret = state.length < state.highWaterMark;
+  // we must ensure that previous needDrain will not be reset to false.
+  if (!ret)
+    state.needDrain = true;
+
+  if (state.writing || state.corked) {
+    var last = state.lastBufferedRequest;
+    state.lastBufferedRequest = new WriteReq(chunk, encoding, cb);
+    if (last) {
+      last.next = state.lastBufferedRequest;
+    } else {
+      state.bufferedRequest = state.lastBufferedRequest;
+    }
+  } else {
+    doWrite(stream, state, false, len, chunk, encoding, cb);
+  }
+
+  return ret;
+}
+
+function doWrite(stream, state, writev, len, chunk, encoding, cb) {
+  state.writelen = len;
+  state.writecb = cb;
+  state.writing = true;
+  state.sync = true;
+  if (writev)
+    stream._writev(chunk, state.onwrite);
+  else
+    stream._write(chunk, encoding, state.onwrite);
+  state.sync = false;
+}
+
+function onwriteError(stream, state, sync, er, cb) {
+  --state.pendingcb;
+  if (sync)
+    processNextTick(cb, er);
+  else
+    cb(er);
+
+  stream._writableState.errorEmitted = true;
+  stream.emit('error', er);
+}
+
+function onwriteStateUpdate(state) {
+  state.writing = false;
+  state.writecb = null;
+  state.length -= state.writelen;
+  state.writelen = 0;
+}
+
+function onwrite(stream, er) {
+  var state = stream._writableState;
+  var sync = state.sync;
+  var cb = state.writecb;
+
+  onwriteStateUpdate(state);
+
+  if (er)
+    onwriteError(stream, state, sync, er, cb);
+  else {
+    // Check if we're actually ready to finish, but don't emit yet
+    var finished = needFinish(state);
+
+    if (!finished &&
+        !state.corked &&
+        !state.bufferProcessing &&
+        state.bufferedRequest) {
+      clearBuffer(stream, state);
+    }
+
+    if (sync) {
+      processNextTick(afterWrite, stream, state, finished, cb);
+    } else {
+      afterWrite(stream, state, finished, cb);
+    }
+  }
+}
+
+function afterWrite(stream, state, finished, cb) {
+  if (!finished)
+    onwriteDrain(stream, state);
+  state.pendingcb--;
+  cb();
+  finishMaybe(stream, state);
+}
+
+// Must force callback to be called on nextTick, so that we don't
+// emit 'drain' before the write() consumer gets the 'false' return
+// value, and has a chance to attach a 'drain' listener.
+function onwriteDrain(stream, state) {
+  if (state.length === 0 && state.needDrain) {
+    state.needDrain = false;
+    stream.emit('drain');
+  }
+}
+
+
+// if there's something in the buffer waiting, then process it
+function clearBuffer(stream, state) {
+  state.bufferProcessing = true;
+  var entry = state.bufferedRequest;
+
+  if (stream._writev && entry && entry.next) {
+    // Fast case, write everything using _writev()
+    var buffer = [];
+    var cbs = [];
+    while (entry) {
+      cbs.push(entry.callback);
+      buffer.push(entry);
+      entry = entry.next;
+    }
+
+    // count the one we are adding, as well.
+    // TODO(isaacs) clean this up
+    state.pendingcb++;
+    state.lastBufferedRequest = null;
+    doWrite(stream, state, true, state.length, buffer, '', function(err) {
+      for (var i = 0; i < cbs.length; i++) {
+        state.pendingcb--;
+        cbs[i](err);
+      }
+    });
+
+    // Clear buffer
+  } else {
+    // Slow case, write chunks one-by-one
+    while (entry) {
+      var chunk = entry.chunk;
+      var encoding = entry.encoding;
+      var cb = entry.callback;
+      var len = state.objectMode ? 1 : chunk.length;
+
+      doWrite(stream, state, false, len, chunk, encoding, cb);
+      entry = entry.next;
+      // if we didn't call the onwrite immediately, then
+      // it means that we need to wait until it does.
+      // also, that means that the chunk and cb are currently
+      // being processed, so move the buffer counter past them.
+      if (state.writing) {
+        break;
+      }
+    }
+
+    if (entry === null)
+      state.lastBufferedRequest = null;
+  }
+  state.bufferedRequest = entry;
+  state.bufferProcessing = false;
+}
+
+Writable.prototype._write = function(chunk, encoding, cb) {
+  cb(new Error('not implemented'));
+};
+
+Writable.prototype._writev = null;
+
+Writable.prototype.end = function(chunk, encoding, cb) {
+  var state = this._writableState;
+
+  if (typeof chunk === 'function') {
+    cb = chunk;
+    chunk = null;
+    encoding = null;
+  } else if (typeof encoding === 'function') {
+    cb = encoding;
+    encoding = null;
+  }
+
+  if (chunk !== null && chunk !== undefined)
+    this.write(chunk, encoding);
+
+  // .end() fully uncorks
+  if (state.corked) {
+    state.corked = 1;
+    this.uncork();
+  }
+
+  // ignore unnecessary end() calls.
+  if (!state.ending && !state.finished)
+    endWritable(this, state, cb);
+};
+
+
+function needFinish(state) {
+  return (state.ending &&
+          state.length === 0 &&
+          state.bufferedRequest === null &&
+          !state.finished &&
+          !state.writing);
+}
+
+function prefinish(stream, state) {
+  if (!state.prefinished) {
+    state.prefinished = true;
+    stream.emit('prefinish');
+  }
+}
+
+function finishMaybe(stream, state) {
+  var need = needFinish(state);
+  if (need) {
+    if (state.pendingcb === 0) {
+      prefinish(stream, state);
+      state.finished = true;
+      stream.emit('finish');
+    } else {
+      prefinish(stream, state);
+    }
+  }
+  return need;
+}
+
+function endWritable(stream, state, cb) {
+  state.ending = true;
+  finishMaybe(stream, state);
+  if (cb) {
+    if (state.finished)
+      processNextTick(cb);
+    else
+      stream.once('finish', cb);
+  }
+  state.ended = true;
+}
+
+},{"./_stream_duplex":57,"buffer":4,"core-util-is":6,"events":22,"inherits":24,"process-nextick-args":40,"util-deprecate":69}],62:[function(require,module,exports){
 module.exports = require("./lib/_stream_passthrough.js")
 
-},{"./lib/_stream_passthrough.js":86}],91:[function(require,module,exports){
-arguments[4][48][0].apply(exports,arguments)
-},{"./lib/_stream_duplex.js":85,"./lib/_stream_passthrough.js":86,"./lib/_stream_readable.js":87,"./lib/_stream_transform.js":88,"./lib/_stream_writable.js":89,"dup":48}],92:[function(require,module,exports){
+},{"./lib/_stream_passthrough.js":58}],63:[function(require,module,exports){
+arguments[4][20][0].apply(exports,arguments)
+},{"./lib/_stream_duplex.js":57,"./lib/_stream_passthrough.js":58,"./lib/_stream_readable.js":59,"./lib/_stream_transform.js":60,"./lib/_stream_writable.js":61,"dup":20}],64:[function(require,module,exports){
 module.exports = require("./lib/_stream_transform.js")
 
-},{"./lib/_stream_transform.js":88}],93:[function(require,module,exports){
+},{"./lib/_stream_transform.js":60}],65:[function(require,module,exports){
 module.exports = require("./lib/_stream_writable.js")
 
-},{"./lib/_stream_writable.js":89}],94:[function(require,module,exports){
+},{"./lib/_stream_writable.js":61}],66:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -28687,7 +24927,7 @@ function base64DetectIncompleteChar(buffer) {
   this.charLength = this.charReceived ? 3 : 0;
 }
 
-},{"buffer":4}],95:[function(require,module,exports){
+},{"buffer":4}],67:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -29421,7 +25661,7 @@ Url.prototype.parseHost = function() {
   if (host) this.hostname = host;
 };
 
-},{"./util":96,"punycode":70,"querystring":73}],96:[function(require,module,exports){
+},{"./util":68,"punycode":42,"querystring":45}],68:[function(require,module,exports){
 'use strict';
 
 module.exports = {
@@ -29439,7 +25679,7 @@ module.exports = {
   }
 };
 
-},{}],97:[function(require,module,exports){
+},{}],69:[function(require,module,exports){
 (function (global){
 
 /**
@@ -29510,14 +25750,14 @@ function config (name) {
 }
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],98:[function(require,module,exports){
+},{}],70:[function(require,module,exports){
 module.exports = function isBuffer(arg) {
   return arg && typeof arg === 'object'
     && typeof arg.copy === 'function'
     && typeof arg.fill === 'function'
     && typeof arg.readUInt8 === 'function';
 }
-},{}],99:[function(require,module,exports){
+},{}],71:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -30107,17 +26347,19 @@ function hasOwnProperty(obj, prop) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./support/isBuffer":98,"_process":69,"inherits":52}],100:[function(require,module,exports){
-arguments[4][43][0].apply(exports,arguments)
-},{"./_stream_readable":101,"./_stream_writable":103,"core-util-is":6,"dup":43,"inherits":52,"process-nextick-args":68}],101:[function(require,module,exports){
-arguments[4][45][0].apply(exports,arguments)
-},{"./_stream_duplex":100,"_process":69,"buffer":4,"core-util-is":6,"dup":45,"events":50,"inherits":52,"isarray":54,"process-nextick-args":68,"string_decoder/":94,"util":3}],102:[function(require,module,exports){
-arguments[4][46][0].apply(exports,arguments)
-},{"./_stream_duplex":100,"core-util-is":6,"dup":46,"inherits":52}],103:[function(require,module,exports){
-arguments[4][47][0].apply(exports,arguments)
-},{"./_stream_duplex":100,"buffer":4,"core-util-is":6,"dup":47,"events":50,"inherits":52,"process-nextick-args":68,"util-deprecate":97}],104:[function(require,module,exports){
-arguments[4][92][0].apply(exports,arguments)
-},{"./lib/_stream_transform.js":102,"dup":92}],105:[function(require,module,exports){
+},{"./support/isBuffer":70,"_process":41,"inherits":24}],72:[function(require,module,exports){
+arguments[4][5][0].apply(exports,arguments)
+},{"dup":5}],73:[function(require,module,exports){
+arguments[4][15][0].apply(exports,arguments)
+},{"./_stream_readable":74,"./_stream_writable":76,"core-util-is":6,"dup":15,"inherits":24,"process-nextick-args":40}],74:[function(require,module,exports){
+arguments[4][17][0].apply(exports,arguments)
+},{"./_stream_duplex":73,"_process":41,"buffer":4,"core-util-is":6,"dup":17,"events":22,"inherits":24,"isarray":72,"process-nextick-args":40,"string_decoder/":66,"util":3}],75:[function(require,module,exports){
+arguments[4][18][0].apply(exports,arguments)
+},{"./_stream_duplex":73,"core-util-is":6,"dup":18,"inherits":24}],76:[function(require,module,exports){
+arguments[4][19][0].apply(exports,arguments)
+},{"./_stream_duplex":73,"_process":41,"buffer":4,"core-util-is":6,"dup":19,"events":22,"inherits":24,"process-nextick-args":40,"util-deprecate":69}],77:[function(require,module,exports){
+arguments[4][64][0].apply(exports,arguments)
+},{"./lib/_stream_transform.js":75,"dup":64}],78:[function(require,module,exports){
 (function (process){
 var Transform = require('readable-stream/transform')
   , inherits  = require('util').inherits
@@ -30217,7 +26459,7 @@ module.exports.obj = through2(function (options, transform, flush) {
 })
 
 }).call(this,require('_process'))
-},{"_process":69,"readable-stream/transform":104,"util":99,"xtend":109}],106:[function(require,module,exports){
+},{"_process":41,"readable-stream/transform":77,"util":71,"xtend":82}],79:[function(require,module,exports){
 (function (process,global,Buffer){
 var through = require('through2')
 var duplexify = require('duplexify')
@@ -30333,10 +26575,10 @@ function WebSocketStream(target, protocols, options) {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"_process":69,"buffer":4,"duplexify":41,"through2":105,"ws":107}],107:[function(require,module,exports){
+},{"_process":41,"buffer":4,"duplexify":12,"through2":78,"ws":80}],80:[function(require,module,exports){
 module.exports = window.WebSocket || window.MozWebSocket
 
-},{}],108:[function(require,module,exports){
+},{}],81:[function(require,module,exports){
 // Returns a wrapper function that returns a wrapped callback
 // The wrapper function should do some stuff, and return a
 // presumably different callback function.
@@ -30371,7 +26613,7 @@ function wrappy (fn, cb) {
   }
 }
 
-},{}],109:[function(require,module,exports){
+},{}],82:[function(require,module,exports){
 module.exports = extend
 
 var hasOwnProperty = Object.prototype.hasOwnProperty;
@@ -30392,7 +26634,7 @@ function extend() {
     return target
 }
 
-},{}],110:[function(require,module,exports){
+},{}],83:[function(require,module,exports){
 (function (global){
 'use strict';
 
@@ -30625,16 +26867,24 @@ function makeIotDriver(options) {
 exports.makeIotDriver = makeIotDriver;
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"../vendor/aws-sdk":112,"./sig":111,"mqtt":62,"ramda":74}],111:[function(require,module,exports){
+},{"../vendor/aws-sdk":85,"./sig":84,"mqtt":34,"ramda":46}],84:[function(require,module,exports){
 'use strict';
 
 Object.defineProperty(exports, "__esModule", {
   value: true
 });
 
-var _cryptoJs = require('crypto-js');
+var _hmacSha = require('crypto-js/hmac-sha256');
 
-var _cryptoJs2 = _interopRequireDefault(_cryptoJs);
+var _hmacSha2 = _interopRequireDefault(_hmacSha);
+
+var _sha = require('crypto-js/sha256');
+
+var _sha2 = _interopRequireDefault(_sha);
+
+var _encHex = require('crypto-js/enc-hex');
+
+var _encHex2 = _interopRequireDefault(_encHex);
 
 var _moment = require('moment');
 
@@ -30648,20 +26898,20 @@ function _interopRequireDefault(obj) { return obj && obj.__esModule ? obj : { de
 function SigV4Utils() {}
 
 SigV4Utils.sign = function sign(key, msg) {
-  var hash = _cryptoJs2.default.HmacSHA256(msg, key);
-  return hash.toString(_cryptoJs2.default.enc.Hex);
+  var hash = (0, _hmacSha2.default)(msg, key);
+  return hash.toString(_encHex2.default);
 };
 
 SigV4Utils.sha256 = function sha256(msg) {
-  var hash = _cryptoJs2.default.SHA256(msg);
-  return hash.toString(_cryptoJs2.default.enc.Hex);
+  var hash = (0, _sha2.default)(msg);
+  return hash.toString(_encHex2.default);
 };
 
 SigV4Utils.getSignatureKey = function getSignatureKey(key, dateStamp, regionName, serviceName) {
-  var kDate = _cryptoJs2.default.HmacSHA256(dateStamp, 'AWS4' + key);
-  var kRegion = _cryptoJs2.default.HmacSHA256(regionName, kDate);
-  var kService = _cryptoJs2.default.HmacSHA256(serviceName, kRegion);
-  var kSigning = _cryptoJs2.default.HmacSHA256('aws4_request', kService);
+  var kDate = (0, _hmacSha2.default)(dateStamp, 'AWS4' + key);
+  var kRegion = (0, _hmacSha2.default)(regionName, kDate);
+  var kService = (0, _hmacSha2.default)(serviceName, kRegion);
+  var kSigning = (0, _hmacSha2.default)('aws4_request', kService);
   return kSigning;
 };
 
@@ -30696,10 +26946,10 @@ SigV4Utils.getSignedUrl = function getSignedUrl(protocol, host, uri, service, re
 
 exports.default = SigV4Utils;
 
-},{"crypto-js":15,"moment":55}],112:[function(require,module,exports){
+},{"crypto-js/enc-hex":8,"crypto-js/hmac-sha256":9,"crypto-js/sha256":11,"moment":27}],85:[function(require,module,exports){
 (function (global){
 "use strict";var _typeof=typeof Symbol==="function"&&typeof Symbol.iterator==="symbol"?function(obj){return typeof obj;}:function(obj){return obj&&typeof Symbol==="function"&&obj.constructor===Symbol?"symbol":typeof obj;};_xamzrequire=function t(e,r,n){function i(s,a){if(!r[s]){if(!e[s]){var u="function"==typeof _xamzrequire&&_xamzrequire;if(!a&&u)return u(s,!0);if(o)return o(s,!0);var c=new Error("Cannot find module '"+s+"'");throw c.code="MODULE_NOT_FOUND",c;}var l=r[s]={exports:{}};e[s][0].call(l.exports,function(t){var r=e[s][1][t];return i(r?r:t);},l,l.exports,t,e,r,n);}return r[s].exports;}for(var o="function"==typeof _xamzrequire&&_xamzrequire,s=0;s<n.length;s++){i(n[s]);}return i;}({24:[function(t,e,r){var n={util:t("./util")},i={};i.toString(),e.exports=n,n.util.update(n,{VERSION:"2.2.41",Signers:{},Protocol:{Json:t("./protocol/json"),Query:t("./protocol/query"),Rest:t("./protocol/rest"),RestJson:t("./protocol/rest_json"),RestXml:t("./protocol/rest_xml")},XML:{Builder:t("./xml/builder"),Parser:null},JSON:{Builder:t("./json/builder"),Parser:t("./json/parser")},Model:{Api:t("./model/api"),Operation:t("./model/operation"),Shape:t("./model/shape"),Paginator:t("./model/paginator"),ResourceWaiter:t("./model/resource_waiter")},util:t("./util"),apiLoader:function apiLoader(){throw new Error("No API loader set");}}),t("./service"),t("./credentials"),t("./credentials/credential_provider_chain"),t("./credentials/temporary_credentials"),t("./credentials/web_identity_credentials"),t("./credentials/cognito_identity_credentials"),t("./credentials/saml_credentials"),t("./config"),t("./http"),t("./sequential_executor"),t("./event_listeners"),t("./request"),t("./response"),t("./resource_waiter"),t("./signers/request_signer"),t("./param_validator"),n.events=new n.SequentialExecutor();},{"./config":23,"./credentials":25,"./credentials/cognito_identity_credentials":26,"./credentials/credential_provider_chain":27,"./credentials/saml_credentials":28,"./credentials/temporary_credentials":29,"./credentials/web_identity_credentials":30,"./event_listeners":36,"./http":37,"./json/builder":39,"./json/parser":40,"./model/api":41,"./model/operation":43,"./model/paginator":44,"./model/resource_waiter":45,"./model/shape":46,"./param_validator":47,"./protocol/json":48,"./protocol/query":49,"./protocol/rest":50,"./protocol/rest_json":51,"./protocol/rest_xml":52,"./request":56,"./resource_waiter":57,"./response":58,"./sequential_executor":60,"./service":61,"./signers/request_signer":77,"./util":84,"./xml/builder":86}],86:[function(t,e,r){function n(){}function i(t,e,r){switch(r.type){case "structure":return o(t,e,r);case "map":return s(t,e,r);case "list":return a(t,e,r);default:return u(t,e,r);}}function o(t,e,r){l.arrayEach(r.memberNames,function(n){var o=r.members[n];if("body"===o.location){var s=e[n],a=o.name;if(void 0!==s&&null!==s)if(o.isXmlAttribute)t.att(a,s);else if(o.flattened)i(t,s,o);else {var u=t.ele(a);c(u,o),i(u,s,o);}}});}function s(t,e,r){var n=r.key.name||"key",o=r.value.name||"value";l.each(e,function(e,s){var a=t.ele(r.flattened?r.name:"entry");i(a.ele(n),e,r.key),i(a.ele(o),s,r.value);});}function a(t,e,r){r.flattened?l.arrayEach(e,function(e){var n=r.member.name||r.name,o=t.ele(n);i(o,e,r.member);}):l.arrayEach(e,function(e){var n=r.member.name||"member",o=t.ele(n);i(o,e,r.member);});}function u(t,e,r){t.txt(r.toWireFormat(e));}function c(t,e){var r,n="xmlns";e.xmlNamespaceUri?(r=e.xmlNamespaceUri,e.xmlNamespacePrefix&&(n+=":"+e.xmlNamespacePrefix)):t.isRoot&&e.api.xmlNamespaceUri&&(r=e.api.xmlNamespaceUri),r&&t.att(n,r);}var l=t("../util"),h=t("xmlbuilder");n.prototype.toXML=function(t,e,r,n){var o=h.create(r);return c(o,e),i(o,t,e),o.children.length>0||n?o.root().toString():"";},e.exports=n;},{"../util":84,xmlbuilder:103}],103:[function(t,e,r){(function(){var r,n;n=t("lodash/object/assign"),r=t("./XMLBuilder"),e.exports.create=function(t,e,i,o){return o=n({},e,i,o),new r(t,o).root();};}).call(this);},{"./XMLBuilder":88,"lodash/object/assign":145}],145:[function(t,e,r){var n=t("../internal/baseAssign"),i=t("../internal/createAssigner"),o=i(n);e.exports=o;},{"../internal/baseAssign":106,"../internal/createAssigner":124}],124:[function(t,e,r){function n(t){return function(){var e=arguments,r=e.length,n=e[0];if(2>r||null==n)return n;var s=e[r-2],a=e[r-1],u=e[3];r>3&&"function"==typeof s?(s=i(s,a,5),r-=2):(s=r>2&&"function"==typeof a?a:null,r-=s?1:0),u&&o(e[1],e[2],u)&&(s=3==r?null:s,r=2);for(var c=0;++c<r;){var l=e[c];l&&t(n,l,s);}return n;};}var i=t("./bindCallback"),o=t("./isIterateeCall");e.exports=n;},{"./bindCallback":123,"./isIterateeCall":130}],106:[function(t,e,r){function n(t,e,r){var n=o(e);if(!r)return i(e,t,n);for(var s=-1,a=n.length;++s<a;){var u=n[s],c=t[u],l=r(c,e[u],u,t,e);(l===l?l===c:c!==c)&&("undefined"!=typeof c||u in t)||(t[u]=l);}return t;}var i=t("./baseCopy"),o=t("../object/keys");e.exports=n;},{"../object/keys":147,"./baseCopy":108}],88:[function(t,e,r){(function(){var r,n,i,o,s;s=t("./XMLStringifier"),n=t("./XMLDeclaration"),i=t("./XMLDocType"),o=t("./XMLElement"),e.exports=r=function(){function t(t,e){var r,n;if(null==t)throw new Error("Root element needs a name");null==e&&(e={}),this.options=e,this.stringify=new s(e),n=new o(this,"doc"),r=n.element(t),r.isRoot=!0,r.documentObject=this,this.rootObject=r,e.headless||(r.declaration(e),(null!=e.pubID||null!=e.sysID)&&r.doctype(e));}return t.prototype.root=function(){return this.rootObject;},t.prototype.end=function(t){return this.toString(t);},t.prototype.toString=function(t){var e,r,n,i,o,s,a,u;return i=(null!=t?t.pretty:void 0)||!1,e=null!=(s=null!=t?t.indent:void 0)?s:"  ",n=null!=(a=null!=t?t.offset:void 0)?a:0,r=null!=(u=null!=t?t.newline:void 0)?u:"\n",o="",null!=this.xmldec&&(o+=this.xmldec.toString(t)),null!=this.doctype&&(o+=this.doctype.toString(t)),o+=this.rootObject.toString(t),i&&o.slice(-r.length)===r&&(o=o.slice(0,-r.length)),o;},t;}();}).call(this);},{"./XMLDeclaration":95,"./XMLDocType":96,"./XMLElement":97,"./XMLStringifier":101}],101:[function(t,e,r){(function(){var t,r=function r(t,e){return function(){return t.apply(e,arguments);};},n={}.hasOwnProperty;e.exports=t=function(){function t(t){this.assertLegalChar=r(this.assertLegalChar,this);var e,i,o;this.allowSurrogateChars=null!=t?t.allowSurrogateChars:void 0,i=(null!=t?t.stringify:void 0)||{};for(e in i){n.call(i,e)&&(o=i[e],this[e]=o);}}return t.prototype.eleName=function(t){return t=""+t||"",this.assertLegalChar(t);},t.prototype.eleText=function(t){return t=""+t||"",this.assertLegalChar(this.elEscape(t));},t.prototype.cdata=function(t){if(t=""+t||"",t.match(/]]>/))throw new Error("Invalid CDATA text: "+t);return this.assertLegalChar(t);},t.prototype.comment=function(t){if(t=""+t||"",t.match(/--/))throw new Error("Comment text cannot contain double-hypen: "+t);return this.assertLegalChar(t);},t.prototype.raw=function(t){return ""+t||"";},t.prototype.attName=function(t){return ""+t||"";},t.prototype.attValue=function(t){return t=""+t||"",this.attEscape(t);},t.prototype.insTarget=function(t){return ""+t||"";},t.prototype.insValue=function(t){if(t=""+t||"",t.match(/\?>/))throw new Error("Invalid processing instruction value: "+t);return t;},t.prototype.xmlVersion=function(t){if(t=""+t||"",!t.match(/1\.[0-9]+/))throw new Error("Invalid version number: "+t);return t;},t.prototype.xmlEncoding=function(t){if(t=""+t||"",!t.match(/[A-Za-z](?:[A-Za-z0-9._-]|-)*/))throw new Error("Invalid encoding: "+t);return t;},t.prototype.xmlStandalone=function(t){return t?"yes":"no";},t.prototype.dtdPubID=function(t){return ""+t||"";},t.prototype.dtdSysID=function(t){return ""+t||"";},t.prototype.dtdElementValue=function(t){return ""+t||"";},t.prototype.dtdAttType=function(t){return ""+t||"";},t.prototype.dtdAttDefault=function(t){return null!=t?""+t||"":t;},t.prototype.dtdEntityValue=function(t){return ""+t||"";},t.prototype.dtdNData=function(t){return ""+t||"";},t.prototype.convertAttKey="@",t.prototype.convertPIKey="?",t.prototype.convertTextKey="#text",t.prototype.convertCDataKey="#cdata",t.prototype.convertCommentKey="#comment",t.prototype.convertRawKey="#raw",t.prototype.convertListKey="#list",t.prototype.assertLegalChar=function(t){var e,r;if(e=this.allowSurrogateChars?/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\uFFFE-\uFFFF]/:/[\u0000-\u0008\u000B-\u000C\u000E-\u001F\uD800-\uDFFF\uFFFE-\uFFFF]/,r=t.match(e))throw new Error("Invalid character ("+r+") in string: "+t+" at index "+r.index);return t;},t.prototype.elEscape=function(t){return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/\r/g,"&#xD;");},t.prototype.attEscape=function(t){return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/"/g,"&quot;").replace(/\t/g,"&#x9;").replace(/\n/g,"&#xA;").replace(/\r/g,"&#xD;");},t;}();}).call(this);},{}],95:[function(t,e,r){(function(){var r,n,i,o,s=function s(t,e){function r(){this.constructor=t;}for(var n in e){a.call(e,n)&&(t[n]=e[n]);}return r.prototype=e.prototype,t.prototype=new r(),t.__super__=e.prototype,t;},a={}.hasOwnProperty;i=t("lodash/object/create"),o=t("lodash/lang/isObject"),n=t("./XMLNode"),e.exports=r=function(t){function e(t,r,n,i){var s;e.__super__.constructor.call(this,t),o(r)&&(s=r,r=s.version,n=s.encoding,i=s.standalone),r||(r="1.0"),null!=r&&(this.version=this.stringify.xmlVersion(r)),null!=n&&(this.encoding=this.stringify.xmlEncoding(n)),null!=i&&(this.standalone=this.stringify.xmlStandalone(i));}return s(e,t),e.prototype.clone=function(){return i(e.prototype,this);},e.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+="<?xml",null!=this.version&&(s+=' version="'+this.version+'"'),null!=this.encoding&&(s+=' encoding="'+this.encoding+'"'),null!=this.standalone&&(s+=' standalone="'+this.standalone+'"'),s+="?>",o&&(s+=n),s;},e;}(n);}).call(this);},{"./XMLNode":98,"lodash/lang/isObject":142,"lodash/object/create":146}],98:[function(t,e,r){(function(){var r,n,i,o,s,a,u,c,l,h,p,f,d={}.hasOwnProperty;f=t("lodash/lang/isObject"),l=t("lodash/lang/isArray"),p=t("lodash/lang/isFunction"),h=t("lodash/lang/isEmpty"),s=null,r=null,n=null,i=null,o=null,u=null,c=null,e.exports=a=function(){function e(e){this.parent=e,this.options=this.parent.options,this.stringify=this.parent.stringify,null===s&&(s=t("./XMLElement"),r=t("./XMLCData"),n=t("./XMLComment"),i=t("./XMLDeclaration"),o=t("./XMLDocType"),u=t("./XMLRaw"),c=t("./XMLText"));}return e.prototype.clone=function(){throw new Error("Cannot clone generic XMLNode");},e.prototype.element=function(t,e,r){var n,i,o,s,a,u,c;if(s=null,null==e&&(e={}),e=e.valueOf(),f(e)||(u=[e,r],r=u[0],e=u[1]),null!=t&&(t=t.valueOf()),l(t))for(i=0,a=t.length;a>i;i++){n=t[i],s=this.element(n);}else if(p(t))s=this.element(t.apply());else if(f(t))for(o in t){d.call(t,o)&&(c=t[o],p(c)&&(c=c.apply()),f(c)&&h(c)&&(c=null),!this.options.ignoreDecorators&&this.stringify.convertAttKey&&0===o.indexOf(this.stringify.convertAttKey)?s=this.attribute(o.substr(this.stringify.convertAttKey.length),c):!this.options.ignoreDecorators&&this.stringify.convertPIKey&&0===o.indexOf(this.stringify.convertPIKey)?s=this.instruction(o.substr(this.stringify.convertPIKey.length),c):f(c)?!this.options.ignoreDecorators&&this.stringify.convertListKey&&0===o.indexOf(this.stringify.convertListKey)&&l(c)?s=this.element(c):(s=this.element(o),s.element(c)):s=this.element(o,c));}else s=!this.options.ignoreDecorators&&this.stringify.convertTextKey&&0===t.indexOf(this.stringify.convertTextKey)?this.text(r):!this.options.ignoreDecorators&&this.stringify.convertCDataKey&&0===t.indexOf(this.stringify.convertCDataKey)?this.cdata(r):!this.options.ignoreDecorators&&this.stringify.convertCommentKey&&0===t.indexOf(this.stringify.convertCommentKey)?this.comment(r):!this.options.ignoreDecorators&&this.stringify.convertRawKey&&0===t.indexOf(this.stringify.convertRawKey)?this.raw(r):this.node(t,e,r);if(null==s)throw new Error("Could not create any elements with: "+t);return s;},e.prototype.insertBefore=function(t,e,r){var n,i,o;if(this.isRoot)throw new Error("Cannot insert elements at root level");return i=this.parent.children.indexOf(this),o=this.parent.children.splice(i),n=this.parent.element(t,e,r),Array.prototype.push.apply(this.parent.children,o),n;},e.prototype.insertAfter=function(t,e,r){var n,i,o;if(this.isRoot)throw new Error("Cannot insert elements at root level");return i=this.parent.children.indexOf(this),o=this.parent.children.splice(i+1),n=this.parent.element(t,e,r),Array.prototype.push.apply(this.parent.children,o),n;},e.prototype.remove=function(){var t,e;if(this.isRoot)throw new Error("Cannot remove the root element");return t=this.parent.children.indexOf(this),[].splice.apply(this.parent.children,[t,t-t+1].concat(e=[])),e,this.parent;},e.prototype.node=function(t,e,r){var n,i;return null!=t&&(t=t.valueOf()),null==e&&(e={}),e=e.valueOf(),f(e)||(i=[e,r],r=i[0],e=i[1]),n=new s(this,t,e),null!=r&&n.text(r),this.children.push(n),n;},e.prototype.text=function(t){var e;return e=new c(this,t),this.children.push(e),this;},e.prototype.cdata=function(t){var e;return e=new r(this,t),this.children.push(e),this;},e.prototype.comment=function(t){var e;return e=new n(this,t),this.children.push(e),this;},e.prototype.raw=function(t){var e;return e=new u(this,t),this.children.push(e),this;},e.prototype.declaration=function(t,e,r){var n,o;return n=this.document(),o=new i(n,t,e,r),n.xmldec=o,n.root();},e.prototype.doctype=function(t,e){var r,n;return r=this.document(),n=new o(r,t,e),r.doctype=n,n;},e.prototype.up=function(){if(this.isRoot)throw new Error("The root node has no parent. Use doc() if you need to get the document object.");return this.parent;},e.prototype.root=function(){var t;if(this.isRoot)return this;for(t=this.parent;!t.isRoot;){t=t.parent;}return t;},e.prototype.document=function(){return this.root().documentObject;},e.prototype.end=function(t){return this.document().toString(t);},e.prototype.prev=function(){var t;if(this.isRoot)throw new Error("Root node has no siblings");if(t=this.parent.children.indexOf(this),1>t)throw new Error("Already at the first node");return this.parent.children[t-1];},e.prototype.next=function(){var t;if(this.isRoot)throw new Error("Root node has no siblings");if(t=this.parent.children.indexOf(this),-1===t||t===this.parent.children.length-1)throw new Error("Already at the last node");return this.parent.children[t+1];},e.prototype.importXMLBuilder=function(t){var e;return e=t.root().clone(),e.parent=this,e.isRoot=!1,this.children.push(e),this;},e.prototype.ele=function(t,e,r){return this.element(t,e,r);},e.prototype.nod=function(t,e,r){return this.node(t,e,r);},e.prototype.txt=function(t){return this.text(t);},e.prototype.dat=function(t){return this.cdata(t);},e.prototype.com=function(t){return this.comment(t);},e.prototype.doc=function(){return this.document();},e.prototype.dec=function(t,e,r){return this.declaration(t,e,r);},e.prototype.dtd=function(t,e){return this.doctype(t,e);},e.prototype.e=function(t,e,r){return this.element(t,e,r);},e.prototype.n=function(t,e,r){return this.node(t,e,r);},e.prototype.t=function(t){return this.text(t);},e.prototype.d=function(t){return this.cdata(t);},e.prototype.c=function(t){return this.comment(t);},e.prototype.r=function(t){return this.raw(t);},e.prototype.u=function(){return this.up();},e;}();}).call(this);},{"./XMLCData":89,"./XMLComment":90,"./XMLDeclaration":95,"./XMLDocType":96,"./XMLElement":97,"./XMLRaw":100,"./XMLText":102,"lodash/lang/isArray":138,"lodash/lang/isEmpty":139,"lodash/lang/isFunction":140,"lodash/lang/isObject":142}],139:[function(t,e,r){function n(t){if(null==t)return !0;var e=t.length;return a(e)&&(o(t)||c(t)||i(t)||u(t)&&s(t.splice))?!e:!l(t).length;}var i=t("./isArguments"),o=t("./isArray"),s=t("./isFunction"),a=t("../internal/isLength"),u=t("../internal/isObjectLike"),c=t("./isString"),l=t("../object/keys");e.exports=n;},{"../internal/isLength":131,"../internal/isObjectLike":132,"../object/keys":147,"./isArguments":137,"./isArray":138,"./isFunction":140,"./isString":143}],143:[function(t,e,r){function n(t){return "string"==typeof t||i(t)&&a.call(t)==o||!1;}var i=t("../internal/isObjectLike"),o="[object String]",s=Object.prototype,a=s.toString;e.exports=n;},{"../internal/isObjectLike":132}],102:[function(t,e,r){(function(){var r,n,i,o=function o(t,e){function r(){this.constructor=t;}for(var n in e){s.call(e,n)&&(t[n]=e[n]);}return r.prototype=e.prototype,t.prototype=new r(),t.__super__=e.prototype,t;},s={}.hasOwnProperty;i=t("lodash/object/create"),r=t("./XMLNode"),e.exports=n=function(t){function e(t,r){if(e.__super__.constructor.call(this,t),null==r)throw new Error("Missing element text");this.value=this.stringify.eleText(r);}return o(e,t),e.prototype.clone=function(){return i(e.prototype,this);},e.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+=this.value,o&&(s+=n),s;},e;}(r);}).call(this);},{"./XMLNode":98,"lodash/object/create":146}],100:[function(t,e,r){(function(){var r,n,i,o=function o(t,e){function r(){this.constructor=t;}for(var n in e){s.call(e,n)&&(t[n]=e[n]);}return r.prototype=e.prototype,t.prototype=new r(),t.__super__=e.prototype,t;},s={}.hasOwnProperty;i=t("lodash/object/create"),r=t("./XMLNode"),e.exports=n=function(t){function e(t,r){if(e.__super__.constructor.call(this,t),null==r)throw new Error("Missing raw text");this.value=this.stringify.raw(r);}return o(e,t),e.prototype.clone=function(){return i(e.prototype,this);},e.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+=this.value,o&&(s+=n),s;},e;}(r);}).call(this);},{"./XMLNode":98,"lodash/object/create":146}],97:[function(t,e,r){(function(){var r,n,i,o,s,a,u,c,l,h=function h(t,e){function r(){this.constructor=t;}for(var n in e){p.call(e,n)&&(t[n]=e[n]);}return r.prototype=e.prototype,t.prototype=new r(),t.__super__=e.prototype,t;},p={}.hasOwnProperty;s=t("lodash/object/create"),l=t("lodash/lang/isObject"),u=t("lodash/lang/isArray"),c=t("lodash/lang/isFunction"),a=t("lodash/collection/every"),i=t("./XMLNode"),r=t("./XMLAttribute"),o=t("./XMLProcessingInstruction"),e.exports=n=function(t){function e(t,r,n){if(e.__super__.constructor.call(this,t),null==r)throw new Error("Missing element name");this.name=this.stringify.eleName(r),this.children=[],this.instructions=[],this.attributes={},null!=n&&this.attribute(n);}return h(e,t),e.prototype.clone=function(){var t,r,n,i,o,a,u,c;n=s(e.prototype,this),n.isRoot&&(n.documentObject=null),n.attributes={},u=this.attributes;for(r in u){p.call(u,r)&&(t=u[r],n.attributes[r]=t.clone());}for(n.instructions=[],c=this.instructions,i=0,o=c.length;o>i;i++){a=c[i],n.instructions.push(a.clone());}return n.children=[],this.children.forEach(function(t){var e;return e=t.clone(),e.parent=n,n.children.push(e);}),n;},e.prototype.attribute=function(t,e){var n,i;if(null!=t&&(t=t.valueOf()),l(t))for(n in t){p.call(t,n)&&(i=t[n],this.attribute(n,i));}else c(e)&&(e=e.apply()),this.options.skipNullAttributes&&null==e||(this.attributes[t]=new r(this,t,e));return this;},e.prototype.removeAttribute=function(t){var e,r,n;if(null==t)throw new Error("Missing attribute name");if(t=t.valueOf(),u(t))for(r=0,n=t.length;n>r;r++){e=t[r],delete this.attributes[e];}else delete this.attributes[t];return this;},e.prototype.instruction=function(t,e){var r,n,i,s,a;if(null!=t&&(t=t.valueOf()),null!=e&&(e=e.valueOf()),u(t))for(r=0,a=t.length;a>r;r++){n=t[r],this.instruction(n);}else if(l(t))for(n in t){p.call(t,n)&&(i=t[n],this.instruction(n,i));}else c(e)&&(e=e.apply()),s=new o(this,t,e),this.instructions.push(s);return this;},e.prototype.toString=function(t,e){var r,n,i,o,s,u,c,l,h,f,d,y,g,m,v,b,w,E,x,S;for(y=(null!=t?t.pretty:void 0)||!1,o=null!=(m=null!=t?t.indent:void 0)?m:"  ",d=null!=(v=null!=t?t.offset:void 0)?v:0,f=null!=(b=null!=t?t.newline:void 0)?b:"\n",e||(e=0),S=new Array(e+d+1).join(o),g="",w=this.instructions,i=0,c=w.length;c>i;i++){s=w[i],g+=s.toString(t,e+1);}y&&(g+=S),g+="<"+this.name,E=this.attributes;for(h in E){p.call(E,h)&&(r=E[h],g+=r.toString(t));}if(0===this.children.length||a(this.children,function(t){return ""===t.value;}))g+="/>",y&&(g+=f);else if(y&&1===this.children.length&&null!=this.children[0].value)g+=">",g+=this.children[0].value,g+="</"+this.name+">",g+=f;else {for(g+=">",y&&(g+=f),x=this.children,u=0,l=x.length;l>u;u++){n=x[u],g+=n.toString(t,e+1);}y&&(g+=S),g+="</"+this.name+">",y&&(g+=f);}return g;},e.prototype.att=function(t,e){return this.attribute(t,e);},e.prototype.ins=function(t,e){return this.instruction(t,e);},e.prototype.a=function(t,e){return this.attribute(t,e);},e.prototype.i=function(t,e){return this.instruction(t,e);},e;}(i);}).call(this);},{"./XMLAttribute":87,"./XMLNode":98,"./XMLProcessingInstruction":99,"lodash/collection/every":104,"lodash/lang/isArray":138,"lodash/lang/isFunction":140,"lodash/lang/isObject":142,"lodash/object/create":146}],140:[function(t,e,r){(function(r){var n=t("../internal/baseIsFunction"),i=t("./isNative"),o="[object Function]",s=Object.prototype,a=s.toString,u=i(u=r.Uint8Array)&&u,c=n(/x/)||u&&!n(u)?function(t){return a.call(t)==o;}:n;e.exports=c;}).call(this,"undefined"!=typeof global?global:"undefined"!=typeof self?self:"undefined"!=typeof window?window:{});},{"../internal/baseIsFunction":116,"./isNative":141}],116:[function(t,e,r){function n(t){return "function"==typeof t||!1;}e.exports=n;},{}],104:[function(t,e,r){function n(t,e,r){var n=a(t)?i:s;return ("function"!=typeof e||"undefined"!=typeof r)&&(e=o(e,r,3)),n(t,e);}var i=t("../internal/arrayEvery"),o=t("../internal/baseCallback"),s=t("../internal/baseEvery"),a=t("../lang/isArray");e.exports=n;},{"../internal/arrayEvery":105,"../internal/baseCallback":107,"../internal/baseEvery":111,"../lang/isArray":138}],111:[function(t,e,r){function n(t,e){var r=!0;return i(t,function(t,n,i){return r=!!e(t,n,i);}),r;}var i=t("./baseEach");e.exports=n;},{"./baseEach":110}],110:[function(t,e,r){function n(t,e){var r=t?t.length:0;if(!o(r))return i(t,e);for(var n=-1,a=s(t);++n<r&&e(a[n],n,a)!==!1;){}return t;}var i=t("./baseForOwn"),o=t("./isLength"),s=t("./toObject");e.exports=n;},{"./baseForOwn":113,"./isLength":131,"./toObject":136}],113:[function(t,e,r){function n(t,e){return i(t,e,o);}var i=t("./baseFor"),o=t("../object/keys");e.exports=n;},{"../object/keys":147,"./baseFor":112}],112:[function(t,e,r){function n(t,e,r){for(var n=-1,o=i(t),s=r(t),a=s.length;++n<a;){var u=s[n];if(e(o[u],u,o)===!1)break;}return t;}var i=t("./toObject");e.exports=n;},{"./toObject":136}],136:[function(t,e,r){function n(t){return i(t)?t:Object(t);}var i=t("../lang/isObject");e.exports=n;},{"../lang/isObject":142}],107:[function(t,e,r){function n(t,e,r){var n=typeof t==="undefined"?"undefined":_typeof(t);return "function"==n?"undefined"!=typeof e&&c(t)?a(t,e,r):t:null==t?u:"object"==n?i(t):"undefined"==typeof e?s(t+""):o(t+"",e);}var i=t("./baseMatches"),o=t("./baseMatchesProperty"),s=t("./baseProperty"),a=t("./bindCallback"),u=t("../utility/identity"),c=t("./isBindable");e.exports=n;},{"../utility/identity":151,"./baseMatches":118,"./baseMatchesProperty":119,"./baseProperty":120,"./bindCallback":123,"./isBindable":128}],128:[function(t,e,r){function n(t){var e=!(s.funcNames?t.name:s.funcDecomp);if(!e){var r=c.call(t);s.funcNames||(e=!a.test(r)),e||(e=u.test(r)||o(t),i(t,e));}return e;}var i=t("./baseSetData"),o=t("../lang/isNative"),s=t("../support"),a=/^\s*function[ \n\r\t]+\w/,u=/\bthis\b/,c=Function.prototype.toString;e.exports=n;},{"../lang/isNative":141,"../support":150,"./baseSetData":121}],121:[function(t,e,r){var n=t("../utility/identity"),i=t("./metaMap"),o=i?function(t,e){return i.set(t,e),t;}:n;e.exports=o;},{"../utility/identity":151,"./metaMap":134}],134:[function(t,e,r){(function(r){var n=t("../lang/isNative"),i=n(i=r.WeakMap)&&i,o=i&&new i();e.exports=o;}).call(this,"undefined"!=typeof global?global:"undefined"!=typeof self?self:"undefined"!=typeof window?window:{});},{"../lang/isNative":141}],123:[function(t,e,r){function n(t,e,r){if("function"!=typeof t)return i;if("undefined"==typeof e)return t;switch(r){case 1:return function(r){return t.call(e,r);};case 3:return function(r,n,i){return t.call(e,r,n,i);};case 4:return function(r,n,i,o){return t.call(e,r,n,i,o);};case 5:return function(r,n,i,o,s){return t.call(e,r,n,i,o,s);};}return function(){return t.apply(e,arguments);};}var i=t("../utility/identity");e.exports=n;},{"../utility/identity":151}],151:[function(t,e,r){function n(t){return t;}e.exports=n;},{}],120:[function(t,e,r){function n(t){return function(e){return null==e?void 0:e[t];};}e.exports=n;},{}],119:[function(t,e,r){function n(t,e){return o(e)?function(r){return null!=r&&r[t]===e;}:function(r){return null!=r&&i(e,r[t],null,!0);};}var i=t("./baseIsEqual"),o=t("./isStrictComparable");e.exports=n;},{"./baseIsEqual":114,"./isStrictComparable":133}],118:[function(t,e,r){function n(t){var e=s(t),r=e.length;if(1==r){var n=e[0],a=t[n];if(o(a))return function(t){return null!=t&&t[n]===a&&u.call(t,n);};}for(var c=Array(r),l=Array(r);r--;){a=t[e[r]],c[r]=a,l[r]=o(a);}return function(t){return i(t,e,c,l);};}var i=t("./baseIsMatch"),o=t("./isStrictComparable"),s=t("../object/keys"),a=Object.prototype,u=a.hasOwnProperty;e.exports=n;},{"../object/keys":147,"./baseIsMatch":117,"./isStrictComparable":133}],133:[function(t,e,r){function n(t){return t===t&&(0===t?1/t>0:!i(t));}var i=t("../lang/isObject");e.exports=n;},{"../lang/isObject":142}],117:[function(t,e,r){function n(t,e,r,n,o){var a=e.length;if(null==t)return !a;for(var u=-1,c=!o;++u<a;){if(c&&n[u]?r[u]!==t[e[u]]:!s.call(t,e[u]))return !1;}for(u=-1;++u<a;){var l=e[u];if(c&&n[u])var h=s.call(t,l);else {var p=t[l],f=r[u];h=o?o(p,f,l):void 0,"undefined"==typeof h&&(h=i(f,p,o,!0));}if(!h)return !1;}return !0;}var i=t("./baseIsEqual"),o=Object.prototype,s=o.hasOwnProperty;e.exports=n;},{"./baseIsEqual":114}],114:[function(t,e,r){function n(t,e,r,o,s,a){if(t===e)return 0!==t||1/t==1/e;var u=typeof t==="undefined"?"undefined":_typeof(t),c=typeof e==="undefined"?"undefined":_typeof(e);return "function"!=u&&"object"!=u&&"function"!=c&&"object"!=c||null==t||null==e?t!==t&&e!==e:i(t,e,n,r,o,s,a);}var i=t("./baseIsEqualDeep");e.exports=n;},{"./baseIsEqualDeep":115}],115:[function(t,e,r){function n(t,e,r,n,p,y,g){var m=a(t),v=a(e),b=l,w=l;m||(b=d.call(t),b==c?b=h:b!=h&&(m=u(t))),v||(w=d.call(e),w==c?w=h:w!=h&&(v=u(e)));var E=b==h,x=w==h,S=b==w;if(S&&!m&&!E)return o(t,e,b);var A=E&&f.call(t,"__wrapped__"),R=x&&f.call(e,"__wrapped__");if(A||R)return r(A?t.value():t,R?e.value():e,n,p,y,g);if(!S)return !1;y||(y=[]),g||(g=[]);for(var C=y.length;C--;){if(y[C]==t)return g[C]==e;}y.push(t),g.push(e);var I=(m?i:s)(t,e,r,n,p,y,g);return y.pop(),g.pop(),I;}var i=t("./equalArrays"),o=t("./equalByTag"),s=t("./equalObjects"),a=t("../lang/isArray"),u=t("../lang/isTypedArray"),c="[object Arguments]",l="[object Array]",h="[object Object]",p=Object.prototype,f=p.hasOwnProperty,d=p.toString;e.exports=n;},{"../lang/isArray":138,"../lang/isTypedArray":144,"./equalArrays":125,"./equalByTag":126,"./equalObjects":127}],144:[function(t,e,r){function n(t){return o(t)&&i(t.length)&&L[j.call(t)]||!1;}var i=t("../internal/isLength"),o=t("../internal/isObjectLike"),s="[object Arguments]",a="[object Array]",u="[object Boolean]",c="[object Date]",l="[object Error]",h="[object Function]",p="[object Map]",f="[object Number]",d="[object Object]",y="[object RegExp]",g="[object Set]",m="[object String]",v="[object WeakMap]",b="[object ArrayBuffer]",w="[object Float32Array]",E="[object Float64Array]",x="[object Int8Array]",S="[object Int16Array]",A="[object Int32Array]",R="[object Uint8Array]",C="[object Uint8ClampedArray]",I="[object Uint16Array]",T="[object Uint32Array]",L={};L[w]=L[E]=L[x]=L[S]=L[A]=L[R]=L[C]=L[I]=L[T]=!0,L[s]=L[a]=L[b]=L[u]=L[c]=L[l]=L[h]=L[p]=L[f]=L[d]=L[y]=L[g]=L[m]=L[v]=!1;var _=Object.prototype,j=_.toString;e.exports=n;},{"../internal/isLength":131,"../internal/isObjectLike":132}],127:[function(t,e,r){function n(t,e,r,n,o,a,u){var c=i(t),l=c.length,h=i(e),p=h.length;if(l!=p&&!o)return !1;for(var f,d=-1;++d<l;){var y=c[d],g=s.call(e,y);if(g){var m=t[y],v=e[y];g=void 0,n&&(g=o?n(v,m,y):n(m,v,y)),"undefined"==typeof g&&(g=m&&m===v||r(m,v,n,o,a,u));}if(!g)return !1;f||(f="constructor"==y);}if(!f){var b=t.constructor,w=e.constructor;if(b!=w&&"constructor" in t&&"constructor" in e&&!("function"==typeof b&&b instanceof b&&"function"==typeof w&&w instanceof w))return !1;}return !0;}var i=t("../object/keys"),o=Object.prototype,s=o.hasOwnProperty;e.exports=n;},{"../object/keys":147}],126:[function(t,e,r){function n(t,e,r){switch(r){case i:case o:return +t==+e;case s:return t.name==e.name&&t.message==e.message;case a:return t!=+t?e!=+e:0==t?1/t==1/e:t==+e;case u:case c:return t==e+"";}return !1;}var i="[object Boolean]",o="[object Date]",s="[object Error]",a="[object Number]",u="[object RegExp]",c="[object String]";e.exports=n;},{}],125:[function(t,e,r){function n(t,e,r,n,i,o,s){var a=-1,u=t.length,c=e.length,l=!0;if(u!=c&&!(i&&c>u))return !1;for(;l&&++a<u;){var h=t[a],p=e[a];if(l=void 0,n&&(l=i?n(p,h,a):n(h,p,a)),"undefined"==typeof l)if(i)for(var f=c;f--&&(p=e[f],!(l=h&&h===p||r(h,p,n,i,o,s)));){}else l=h&&h===p||r(h,p,n,i,o,s);}return !!l;}e.exports=n;},{}],105:[function(t,e,r){function n(t,e){for(var r=-1,n=t.length;++r<n;){if(!e(t[r],r,t))return !1;}return !0;}e.exports=n;},{}],87:[function(t,e,r){(function(){var r,n;n=t("lodash/object/create"),e.exports=r=function(){function t(t,e,r){if(this.stringify=t.stringify,null==e)throw new Error("Missing attribute name of element "+t.name);if(null==r)throw new Error("Missing attribute value for attribute "+e+" of element "+t.name);this.name=this.stringify.attName(e),this.value=this.stringify.attValue(r);}return t.prototype.clone=function(){return n(t.prototype,this);},t.prototype.toString=function(t,e){return " "+this.name+'="'+this.value+'"';},t;}();}).call(this);},{"lodash/object/create":146}],96:[function(t,e,r){(function(){var r,n,i,o,s,a,u,c,l,h;l=t("lodash/object/create"),h=t("lodash/lang/isObject"),r=t("./XMLCData"),n=t("./XMLComment"),i=t("./XMLDTDAttList"),s=t("./XMLDTDEntity"),o=t("./XMLDTDElement"),a=t("./XMLDTDNotation"),c=t("./XMLProcessingInstruction"),e.exports=u=function(){function t(t,e,r){var n,i;this.documentObject=t,this.stringify=this.documentObject.stringify,this.children=[],h(e)&&(n=e,e=n.pubID,r=n.sysID),null==r&&(i=[e,r],r=i[0],e=i[1]),null!=e&&(this.pubID=this.stringify.dtdPubID(e)),null!=r&&(this.sysID=this.stringify.dtdSysID(r));}return t.prototype.clone=function(){return l(t.prototype,this);},t.prototype.element=function(t,e){var r;return r=new o(this,t,e),this.children.push(r),this;},t.prototype.attList=function(t,e,r,n,o){var s;return s=new i(this,t,e,r,n,o),this.children.push(s),this;},t.prototype.entity=function(t,e){var r;return r=new s(this,!1,t,e),this.children.push(r),this;},t.prototype.pEntity=function(t,e){var r;return r=new s(this,!0,t,e),this.children.push(r),this;},t.prototype.notation=function(t,e){var r;return r=new a(this,t,e),this.children.push(r),this;},t.prototype.cdata=function(t){var e;return e=new r(this,t),this.children.push(e),this;},t.prototype.comment=function(t){var e;return e=new n(this,t),this.children.push(e),this;},t.prototype.instruction=function(t,e){var r;return r=new c(this,t,e),this.children.push(r),this;},t.prototype.root=function(){return this.documentObject.root();},t.prototype.document=function(){return this.documentObject;},t.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l,h,p,f,d;if(u=(null!=t?t.pretty:void 0)||!1,i=null!=(l=null!=t?t.indent:void 0)?l:"  ",a=null!=(h=null!=t?t.offset:void 0)?h:0,s=null!=(p=null!=t?t.newline:void 0)?p:"\n",e||(e=0),d=new Array(e+a+1).join(i),c="",u&&(c+=d),c+="<!DOCTYPE "+this.root().name,this.pubID&&this.sysID?c+=' PUBLIC "'+this.pubID+'" "'+this.sysID+'"':this.sysID&&(c+=' SYSTEM "'+this.sysID+'"'),this.children.length>0){for(c+=" [",u&&(c+=s),f=this.children,n=0,o=f.length;o>n;n++){r=f[n],c+=r.toString(t,e+1);}c+="]";}return c+=">",u&&(c+=s),c;},t.prototype.ele=function(t,e){return this.element(t,e);},t.prototype.att=function(t,e,r,n,i){return this.attList(t,e,r,n,i);},t.prototype.ent=function(t,e){return this.entity(t,e);},t.prototype.pent=function(t,e){return this.pEntity(t,e);},t.prototype.not=function(t,e){return this.notation(t,e);},t.prototype.dat=function(t){return this.cdata(t);},t.prototype.com=function(t){return this.comment(t);},t.prototype.ins=function(t,e){return this.instruction(t,e);},t.prototype.up=function(){return this.root();},t.prototype.doc=function(){return this.document();},t;}();}).call(this);},{"./XMLCData":89,"./XMLComment":90,"./XMLDTDAttList":91,"./XMLDTDElement":92,"./XMLDTDEntity":93,"./XMLDTDNotation":94,"./XMLProcessingInstruction":99,"lodash/lang/isObject":142,"lodash/object/create":146}],99:[function(t,e,r){(function(){var r,n;n=t("lodash/object/create"),e.exports=r=function(){function t(t,e,r){if(this.stringify=t.stringify,null==e)throw new Error("Missing instruction target");this.target=this.stringify.insTarget(e),r&&(this.value=this.stringify.insValue(r));}return t.prototype.clone=function(){return n(t.prototype,this);},t.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+="<?",s+=this.target,this.value&&(s+=" "+this.value),s+="?>",o&&(s+=n),s;},t;}();}).call(this);},{"lodash/object/create":146}],94:[function(t,e,r){(function(){var r,n;n=t("lodash/object/create"),e.exports=r=function(){function t(t,e,r){if(this.stringify=t.stringify,null==e)throw new Error("Missing notation name");if(!r.pubID&&!r.sysID)throw new Error("Public or system identifiers are required for an external entity");this.name=this.stringify.eleName(e),null!=r.pubID&&(this.pubID=this.stringify.dtdPubID(r.pubID)),null!=r.sysID&&(this.sysID=this.stringify.dtdSysID(r.sysID));}return t.prototype.clone=function(){return n(t.prototype,this);},t.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+="<!NOTATION "+this.name,this.pubID&&this.sysID?s+=' PUBLIC "'+this.pubID+'" "'+this.sysID+'"':this.pubID?s+=' PUBLIC "'+this.pubID+'"':this.sysID&&(s+=' SYSTEM "'+this.sysID+'"'),s+=">",o&&(s+=n),s;},t;}();}).call(this);},{"lodash/object/create":146}],93:[function(t,e,r){(function(){var r,n,i;n=t("lodash/object/create"),i=t("lodash/lang/isObject"),e.exports=r=function(){function t(t,e,r,n){if(this.stringify=t.stringify,null==r)throw new Error("Missing entity name");if(null==n)throw new Error("Missing entity value");if(this.pe=!!e,this.name=this.stringify.eleName(r),i(n)){if(!n.pubID&&!n.sysID)throw new Error("Public and/or system identifiers are required for an external entity");if(n.pubID&&!n.sysID)throw new Error("System identifier is required for a public external entity");if(null!=n.pubID&&(this.pubID=this.stringify.dtdPubID(n.pubID)),null!=n.sysID&&(this.sysID=this.stringify.dtdSysID(n.sysID)),null!=n.nData&&(this.nData=this.stringify.dtdNData(n.nData)),this.pe&&this.nData)throw new Error("Notation declaration is not allowed in a parameter entity");}else this.value=this.stringify.dtdEntityValue(n);}return t.prototype.clone=function(){return n(t.prototype,this);},t.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+="<!ENTITY",this.pe&&(s+=" %"),s+=" "+this.name,this.value?s+=' "'+this.value+'"':(this.pubID&&this.sysID?s+=' PUBLIC "'+this.pubID+'" "'+this.sysID+'"':this.sysID&&(s+=' SYSTEM "'+this.sysID+'"'),this.nData&&(s+=" NDATA "+this.nData)),s+=">",o&&(s+=n),s;},t;}();}).call(this);},{"lodash/lang/isObject":142,"lodash/object/create":146}],92:[function(t,e,r){(function(){var r,n,i;n=t("lodash/object/create"),i=t("lodash/lang/isArray"),e.exports=r=function(){function t(t,e,r){if(this.stringify=t.stringify,null==e)throw new Error("Missing DTD element name");r||(r="(#PCDATA)"),i(r)&&(r="("+r.join(",")+")"),this.name=this.stringify.eleName(e),this.value=this.stringify.dtdElementValue(r);}return t.prototype.clone=function(){return n(t.prototype,this);},t.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+="<!ELEMENT "+this.name+" "+this.value+">",o&&(s+=n),s;},t;}();}).call(this);},{"lodash/lang/isArray":138,"lodash/object/create":146}],91:[function(t,e,r){(function(){var r,n;n=t("lodash/object/create"),e.exports=r=function(){function t(t,e,r,n,i,o){if(this.stringify=t.stringify,null==e)throw new Error("Missing DTD element name");if(null==r)throw new Error("Missing DTD attribute name");if(!n)throw new Error("Missing DTD attribute type");if(!i)throw new Error("Missing DTD attribute default");if(0!==i.indexOf("#")&&(i="#"+i),!i.match(/^(#REQUIRED|#IMPLIED|#FIXED|#DEFAULT)$/))throw new Error("Invalid default value type; expected: #REQUIRED, #IMPLIED, #FIXED or #DEFAULT");if(o&&!i.match(/^(#FIXED|#DEFAULT)$/))throw new Error("Default value only applies to #FIXED or #DEFAULT");this.elementName=this.stringify.eleName(e),this.attributeName=this.stringify.attName(r),this.attributeType=this.stringify.dtdAttType(n),this.defaultValue=this.stringify.dtdAttDefault(o),this.defaultValueType=i;}return t.prototype.clone=function(){return n(t.prototype,this);},t.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+="<!ATTLIST "+this.elementName+" "+this.attributeName+" "+this.attributeType,"#DEFAULT"!==this.defaultValueType&&(s+=" "+this.defaultValueType),this.defaultValue&&(s+=' "'+this.defaultValue+'"'),s+=">",o&&(s+=n),s;},t;}();}).call(this);},{"lodash/object/create":146}],90:[function(t,e,r){(function(){var r,n,i,o=function o(t,e){function r(){this.constructor=t;}for(var n in e){s.call(e,n)&&(t[n]=e[n]);}return r.prototype=e.prototype,t.prototype=new r(),t.__super__=e.prototype,t;},s={}.hasOwnProperty;i=t("lodash/object/create"),n=t("./XMLNode"),e.exports=r=function(t){function e(t,r){if(e.__super__.constructor.call(this,t),null==r)throw new Error("Missing comment text");this.text=this.stringify.comment(r);}return o(e,t),e.prototype.clone=function(){return i(e.prototype,this);},e.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+="<!-- "+this.text+" -->",o&&(s+=n),s;},e;}(n);}).call(this);},{"./XMLNode":98,"lodash/object/create":146}],89:[function(t,e,r){(function(){var r,n,i,o=function o(t,e){function r(){this.constructor=t;}for(var n in e){s.call(e,n)&&(t[n]=e[n]);}return r.prototype=e.prototype,t.prototype=new r(),t.__super__=e.prototype,t;},s={}.hasOwnProperty;i=t("lodash/object/create"),n=t("./XMLNode"),e.exports=r=function(t){function e(t,r){if(e.__super__.constructor.call(this,t),null==r)throw new Error("Missing CDATA text");this.text=this.stringify.cdata(r);}return o(e,t),e.prototype.clone=function(){return i(e.prototype,this);},e.prototype.toString=function(t,e){var r,n,i,o,s,a,u,c,l;return o=(null!=t?t.pretty:void 0)||!1,r=null!=(a=null!=t?t.indent:void 0)?a:"  ",i=null!=(u=null!=t?t.offset:void 0)?u:0,n=null!=(c=null!=t?t.newline:void 0)?c:"\n",e||(e=0),l=new Array(e+i+1).join(r),s="",o&&(s+=l),s+="<![CDATA["+this.text+"]]>",o&&(s+=n),s;},e;}(n);}).call(this);},{"./XMLNode":98,"lodash/object/create":146}],146:[function(t,e,r){function n(t,e,r){var n=o(t);return r&&s(t,e,r)&&(e=null),e?i(e,n,a(e)):n;}var i=t("../internal/baseCopy"),o=t("../internal/baseCreate"),s=t("../internal/isIterateeCall"),a=t("./keys");e.exports=n;},{"../internal/baseCopy":108,"../internal/baseCreate":109,"../internal/isIterateeCall":130,"./keys":147}],147:[function(t,e,r){var n=t("../internal/isLength"),i=t("../lang/isNative"),o=t("../lang/isObject"),s=t("../internal/shimKeys"),a=i(a=Object.keys)&&a,u=a?function(t){if(t)var e=t.constructor,r=t.length;return "function"==typeof e&&e.prototype===t||"function"!=typeof t&&r&&n(r)?s(t):o(t)?a(t):[];}:s;e.exports=u;},{"../internal/isLength":131,"../internal/shimKeys":135,"../lang/isNative":141,"../lang/isObject":142}],135:[function(t,e,r){function n(t){for(var e=u(t),r=e.length,n=r&&t.length,l=n&&a(n)&&(o(t)||c.nonEnumArgs&&i(t)),p=-1,f=[];++p<r;){var d=e[p];(l&&s(d,n)||h.call(t,d))&&f.push(d);}return f;}var i=t("../lang/isArguments"),o=t("../lang/isArray"),s=t("./isIndex"),a=t("./isLength"),u=t("../object/keysIn"),c=t("../support"),l=Object.prototype,h=l.hasOwnProperty;e.exports=n;},{"../lang/isArguments":137,"../lang/isArray":138,"../object/keysIn":148,"../support":150,"./isIndex":129,"./isLength":131}],148:[function(t,e,r){function n(t){if(null==t)return [];u(t)||(t=Object(t));var e=t.length;e=e&&a(e)&&(o(t)||c.nonEnumArgs&&i(t))&&e||0;for(var r=t.constructor,n=-1,l="function"==typeof r&&r.prototype===t,p=Array(e),f=e>0;++n<e;){p[n]=n+"";}for(var d in t){f&&s(d,e)||"constructor"==d&&(l||!h.call(t,d))||p.push(d);}return p;}var i=t("../lang/isArguments"),o=t("../lang/isArray"),s=t("../internal/isIndex"),a=t("../internal/isLength"),u=t("../lang/isObject"),c=t("../support"),l=Object.prototype,h=l.hasOwnProperty;e.exports=n;},{"../internal/isIndex":129,"../internal/isLength":131,"../lang/isArguments":137,"../lang/isArray":138,"../lang/isObject":142,"../support":150}],150:[function(t,e,r){(function(r){var n=t("./lang/isNative"),i=/\bthis\b/,o=Object.prototype,s=(s=r.window)&&s.document,a=o.propertyIsEnumerable,u={};!function(t){u.funcDecomp=!n(r.WinRTError)&&i.test(function(){return this;}),u.funcNames="string"==typeof Function.name;try{u.dom=11===s.createDocumentFragment().nodeType;}catch(e){u.dom=!1;}try{u.nonEnumArgs=!a.call(arguments,1);}catch(e){u.nonEnumArgs=!0;}}(0,0),e.exports=u;}).call(this,"undefined"!=typeof global?global:"undefined"!=typeof self?self:"undefined"!=typeof window?window:{});},{"./lang/isNative":141}],138:[function(t,e,r){var n=t("../internal/isLength"),i=t("./isNative"),o=t("../internal/isObjectLike"),s="[object Array]",a=Object.prototype,u=a.toString,c=i(c=Array.isArray)&&c,l=c||function(t){return o(t)&&n(t.length)&&u.call(t)==s||!1;};e.exports=l;},{"../internal/isLength":131,"../internal/isObjectLike":132,"./isNative":141}],141:[function(t,e,r){function n(t){return null==t?!1:l.call(t)==s?h.test(c.call(t)):o(t)&&a.test(t)||!1;}var i=t("../string/escapeRegExp"),o=t("../internal/isObjectLike"),s="[object Function]",a=/^\[object .+?Constructor\]$/,u=Object.prototype,c=Function.prototype.toString,l=u.toString,h=RegExp("^"+i(l).replace(/toString|(function).*?(?=\\\()| for .+?(?=\\\])/g,"$1.*?")+"$");e.exports=n;},{"../internal/isObjectLike":132,"../string/escapeRegExp":149}],149:[function(t,e,r){function n(t){return t=i(t),t&&s.test(t)?t.replace(o,"\\$&"):t;}var i=t("../internal/baseToString"),o=/[.*+?^${}()|[\]\/\\]/g,s=RegExp(o.source);e.exports=n;},{"../internal/baseToString":122}],122:[function(t,e,r){function n(t){return "string"==typeof t?t:null==t?"":t+"";}e.exports=n;},{}],137:[function(t,e,r){function n(t){var e=o(t)?t.length:void 0;return i(e)&&u.call(t)==s||!1;}var i=t("../internal/isLength"),o=t("../internal/isObjectLike"),s="[object Arguments]",a=Object.prototype,u=a.toString;e.exports=n;},{"../internal/isLength":131,"../internal/isObjectLike":132}],132:[function(t,e,r){function n(t){return t&&"object"==(typeof t==="undefined"?"undefined":_typeof(t))||!1;}e.exports=n;},{}],130:[function(t,e,r){function n(t,e,r){if(!s(r))return !1;var n=typeof e==="undefined"?"undefined":_typeof(e);if("number"==n)var a=r.length,u=o(a)&&i(e,a);else u="string"==n&&e in r;if(u){var c=r[e];return t===t?t===c:c!==c;}return !1;}var i=t("./isIndex"),o=t("./isLength"),s=t("../lang/isObject");e.exports=n;},{"../lang/isObject":142,"./isIndex":129,"./isLength":131}],131:[function(t,e,r){function n(t){return "number"==typeof t&&t>-1&&t%1==0&&i>=t;}var i=Math.pow(2,53)-1;e.exports=n;},{}],129:[function(t,e,r){function n(t,e){return t=+t,e=null==e?i:e,t>-1&&t%1==0&&e>t;}var i=Math.pow(2,53)-1;e.exports=n;},{}],109:[function(t,e,r){(function(r){var n=t("../lang/isObject"),i=function(){function t(){}return function(e){if(n(e)){t.prototype=e;var i=new t();t.prototype=null;}return i||r.Object();};}();e.exports=i;}).call(this,"undefined"!=typeof global?global:"undefined"!=typeof self?self:"undefined"!=typeof window?window:{});},{"../lang/isObject":142}],142:[function(t,e,r){function n(t){var e=typeof t==="undefined"?"undefined":_typeof(t);return "function"==e||t&&"object"==e||!1;}e.exports=n;},{}],108:[function(t,e,r){function n(t,e,r){r||(r=e,e={});for(var n=-1,i=r.length;++n<i;){var o=r[n];e[o]=t[o];}return e;}e.exports=n;},{}],77:[function(t,e,r){var n=t("../core"),i=n.util.inherit;n.Signers.RequestSigner=i({constructor:function constructor(t){this.request=t;}}),n.Signers.RequestSigner.getVersion=function(t){switch(t){case "v2":return n.Signers.V2;case "v3":return n.Signers.V3;case "v4":return n.Signers.V4;case "s3":return n.Signers.S3;case "v3https":return n.Signers.V3Https;}throw new Error("Unknown signing version "+t);},t("./v2"),t("./v3"),t("./v3https"),t("./v4"),t("./s3"),t("./presign");},{"../core":24,"./presign":76,"./s3":78,"./v2":79,"./v3":80,"./v3https":81,"./v4":82}],82:[function(t,e,r){var n=t("../core"),i=n.util.inherit,o={},s="presigned-expires";n.Signers.V4=i(n.Signers.RequestSigner,{constructor:function constructor(t,e,r){n.Signers.RequestSigner.call(this,t),this.serviceName=e,this.signatureCache=r;},algorithm:"AWS4-HMAC-SHA256",addAuthorization:function addAuthorization(t,e){var r=n.util.date.iso8601(e).replace(/[:\-]|\.\d{3}/g,"");this.isPresigned()?this.updateForPresigned(t,r):this.addHeaders(t,r),this.request.headers.Authorization=this.authorization(t,r);},addHeaders:function addHeaders(t,e){this.request.headers["X-Amz-Date"]=e,t.sessionToken&&(this.request.headers["x-amz-security-token"]=t.sessionToken);},updateForPresigned:function updateForPresigned(t,e){var r=this.credentialString(e),i={"X-Amz-Date":e,"X-Amz-Algorithm":this.algorithm,"X-Amz-Credential":t.accessKeyId+"/"+r,"X-Amz-Expires":this.request.headers[s],"X-Amz-SignedHeaders":this.signedHeaders()};t.sessionToken&&(i["X-Amz-Security-Token"]=t.sessionToken),this.request.headers["Content-Type"]&&(i["Content-Type"]=this.request.headers["Content-Type"]),this.request.headers["Content-MD5"]&&(i["Content-MD5"]=this.request.headers["Content-MD5"]),this.request.headers["Cache-Control"]&&(i["Cache-Control"]=this.request.headers["Cache-Control"]),n.util.each.call(this,this.request.headers,function(t,e){t!==s&&this.isSignableHeader(t)&&0===t.toLowerCase().indexOf("x-amz-")&&(i[t]=e);});var o=this.request.path.indexOf("?")>=0?"&":"?";this.request.path+=o+n.util.queryParamsToString(i);},authorization:function authorization(t,e){var r=[],n=this.credentialString(e);return r.push(this.algorithm+" Credential="+t.accessKeyId+"/"+n),r.push("SignedHeaders="+this.signedHeaders()),r.push("Signature="+this.signature(t,e)),r.join(", ");},signature:function signature(t,e){var r=null;if(this.signatureCache)var r=o[this.serviceName];var i=e.substr(0,8);if(!r||r.akid!==t.accessKeyId||r.region!==this.request.region||r.date!==i){var s=t.secretAccessKey,a=n.util.crypto.hmac("AWS4"+s,i,"buffer"),u=n.util.crypto.hmac(a,this.request.region,"buffer"),c=n.util.crypto.hmac(u,this.serviceName,"buffer"),l=n.util.crypto.hmac(c,"aws4_request","buffer");if(!this.signatureCache)return n.util.crypto.hmac(l,this.stringToSign(e),"hex");o[this.serviceName]={region:this.request.region,date:i,key:l,akid:t.accessKeyId};}var h=o[this.serviceName].key;return n.util.crypto.hmac(h,this.stringToSign(e),"hex");},stringToSign:function stringToSign(t){var e=[];return e.push("AWS4-HMAC-SHA256"),e.push(t),e.push(this.credentialString(t)),e.push(this.hexEncodedHash(this.canonicalString())),e.join("\n");},canonicalString:function canonicalString(){var t=[],e=this.request.pathname();return "s3"!==this.serviceName&&(e=n.util.uriEscapePath(e)),t.push(this.request.method),t.push(e),t.push(this.request.search()),t.push(this.canonicalHeaders()+"\n"),t.push(this.signedHeaders()),t.push(this.hexEncodedBodyHash()),t.join("\n");},canonicalHeaders:function canonicalHeaders(){var t=[];n.util.each.call(this,this.request.headers,function(e,r){t.push([e,r]);}),t.sort(function(t,e){return t[0].toLowerCase()<e[0].toLowerCase()?-1:1;});var e=[];return n.util.arrayEach.call(this,t,function(t){var r=t[0].toLowerCase();this.isSignableHeader(r)&&e.push(r+":"+this.canonicalHeaderValues(t[1].toString()));}),e.join("\n");},canonicalHeaderValues:function canonicalHeaderValues(t){return t.replace(/\s+/g," ").replace(/^\s+|\s+$/g,"");},signedHeaders:function signedHeaders(){var t=[];return n.util.each.call(this,this.request.headers,function(e){e=e.toLowerCase(),this.isSignableHeader(e)&&t.push(e);}),t.sort().join(";");},credentialString:function credentialString(t){var e=[];return e.push(t.substr(0,8)),e.push(this.request.region),e.push(this.serviceName),e.push("aws4_request"),e.join("/");},hexEncodedHash:function hexEncodedHash(t){return n.util.crypto.sha256(t,"hex");},hexEncodedBodyHash:function hexEncodedBodyHash(){return this.isPresigned()&&"s3"===this.serviceName?"UNSIGNED-PAYLOAD":this.request.headers["X-Amz-Content-Sha256"]?this.request.headers["X-Amz-Content-Sha256"]:this.hexEncodedHash(this.request.body||"");},unsignableHeaders:["authorization","content-type","content-length","user-agent",s],isSignableHeader:function isSignableHeader(t){return 0===t.toLowerCase().indexOf("x-amz-")?!0:this.unsignableHeaders.indexOf(t)<0;},isPresigned:function isPresigned(){return this.request.headers[s]?!0:!1;}}),e.exports=n.Signers.V4;},{"../core":24}],81:[function(t,e,r){var n=t("../core"),i=n.util.inherit;t("./v3"),n.Signers.V3Https=i(n.Signers.V3,{authorization:function authorization(t){return "AWS3-HTTPS AWSAccessKeyId="+t.accessKeyId+",Algorithm=HmacSHA256,Signature="+this.signature(t);},stringToSign:function stringToSign(){return this.request.headers["X-Amz-Date"];}}),e.exports=n.Signers.V3Https;},{"../core":24,"./v3":80}],80:[function(t,e,r){var n=t("../core"),i=n.util.inherit;n.Signers.V3=i(n.Signers.RequestSigner,{addAuthorization:function addAuthorization(t,e){var r=n.util.date.rfc822(e);this.request.headers["X-Amz-Date"]=r,t.sessionToken&&(this.request.headers["x-amz-security-token"]=t.sessionToken),this.request.headers["X-Amzn-Authorization"]=this.authorization(t,r);},authorization:function authorization(t){return "AWS3 AWSAccessKeyId="+t.accessKeyId+",Algorithm=HmacSHA256,SignedHeaders="+this.signedHeaders()+",Signature="+this.signature(t);},signedHeaders:function signedHeaders(){var t=[];return n.util.arrayEach(this.headersToSign(),function(e){t.push(e.toLowerCase());}),t.sort().join(";");},canonicalHeaders:function canonicalHeaders(){var t=this.request.headers,e=[];return n.util.arrayEach(this.headersToSign(),function(r){e.push(r.toLowerCase().trim()+":"+String(t[r]).trim());}),e.sort().join("\n")+"\n";},headersToSign:function headersToSign(){var t=[];return n.util.each(this.request.headers,function(e){("Host"===e||"Content-Encoding"===e||e.match(/^X-Amz/i))&&t.push(e);}),t;},signature:function signature(t){return n.util.crypto.hmac(t.secretAccessKey,this.stringToSign(),"base64");},stringToSign:function stringToSign(){var t=[];return t.push(this.request.method),t.push("/"),t.push(""),t.push(this.canonicalHeaders()),t.push(this.request.body),n.util.crypto.sha256(t.join("\n"));}}),e.exports=n.Signers.V3;},{"../core":24}],79:[function(t,e,r){var n=t("../core"),i=n.util.inherit;n.Signers.V2=i(n.Signers.RequestSigner,{addAuthorization:function addAuthorization(t,e){e||(e=n.util.date.getDate());var r=this.request;r.params.Timestamp=n.util.date.iso8601(e),r.params.SignatureVersion="2",r.params.SignatureMethod="HmacSHA256",r.params.AWSAccessKeyId=t.accessKeyId,t.sessionToken&&(r.params.SecurityToken=t.sessionToken),delete r.params.Signature,r.params.Signature=this.signature(t),r.body=n.util.queryParamsToString(r.params),r.headers["Content-Length"]=r.body.length;},signature:function signature(t){return n.util.crypto.hmac(t.secretAccessKey,this.stringToSign(),"base64");},stringToSign:function stringToSign(){var t=[];return t.push(this.request.method),t.push(this.request.endpoint.host.toLowerCase()),t.push(this.request.pathname()),t.push(n.util.queryParamsToString(this.request.params)),t.join("\n");}}),e.exports=n.Signers.V2;},{"../core":24}],78:[function(t,e,r){var n=t("../core"),i=n.util.inherit;n.Signers.S3=i(n.Signers.RequestSigner,{subResources:{acl:1,cors:1,lifecycle:1,"delete":1,location:1,logging:1,notification:1,partNumber:1,policy:1,requestPayment:1,restore:1,tagging:1,torrent:1,uploadId:1,uploads:1,versionId:1,versioning:1,versions:1,website:1},responseHeaders:{"response-content-type":1,"response-content-language":1,"response-expires":1,"response-cache-control":1,"response-content-disposition":1,"response-content-encoding":1},addAuthorization:function addAuthorization(t,e){this.request.headers["presigned-expires"]||(this.request.headers["X-Amz-Date"]=n.util.date.rfc822(e)),t.sessionToken&&(this.request.headers["x-amz-security-token"]=t.sessionToken);var r=this.sign(t.secretAccessKey,this.stringToSign()),i="AWS "+t.accessKeyId+":"+r;this.request.headers.Authorization=i;},stringToSign:function stringToSign(){var t=this.request,e=[];e.push(t.method),e.push(t.headers["Content-MD5"]||""),e.push(t.headers["Content-Type"]||""),e.push(t.headers["presigned-expires"]||"");var r=this.canonicalizedAmzHeaders();return r&&e.push(r),e.push(this.canonicalizedResource()),e.join("\n");},canonicalizedAmzHeaders:function canonicalizedAmzHeaders(){var t=[];n.util.each(this.request.headers,function(e){e.match(/^x-amz-/i)&&t.push(e);}),t.sort(function(t,e){return t.toLowerCase()<e.toLowerCase()?-1:1;});var e=[];return n.util.arrayEach.call(this,t,function(t){e.push(t.toLowerCase()+":"+String(this.request.headers[t]));}),e.join("\n");},canonicalizedResource:function canonicalizedResource(){var t=this.request,e=t.path.split("?"),r=e[0],i=e[1],o="";if(t.virtualHostedBucket&&(o+="/"+t.virtualHostedBucket),o+=r,i){var s=[];n.util.arrayEach.call(this,i.split("&"),function(t){var e=t.split("=")[0],r=t.split("=")[1];if(this.subResources[e]||this.responseHeaders[e]){var n={name:e};void 0!==r&&(this.subResources[e]?n.value=r:n.value=decodeURIComponent(r)),s.push(n);}}),s.sort(function(t,e){return t.name<e.name?-1:1;}),s.length&&(i=[],n.util.arrayEach(s,function(t){void 0===t.value?i.push(t.name):i.push(t.name+"="+t.value);}),o+="?"+i.join("&"));}return o;},sign:function sign(t,e){return n.util.crypto.hmac(t,e,"base64","sha1");}}),e.exports=n.Signers.S3;},{"../core":24}],76:[function(t,e,r){function n(t){var e=t.httpRequest.headers[a];if(delete t.httpRequest.headers["User-Agent"],delete t.httpRequest.headers["X-Amz-User-Agent"],t.service.getSignerClass()===o.Signers.V4){if(e>604800){var r="Presigning does not support expiry time greater than a week with SigV4 signing.";throw o.util.error(new Error(),{code:"InvalidExpiryTime",message:r,retryable:!1});}t.httpRequest.headers[a]=e;}else {if(t.service.getSignerClass()!==o.Signers.S3)throw o.util.error(new Error(),{message:"Presigning only supports S3 or SigV4 signing.",code:"UnsupportedSigner",retryable:!1});t.httpRequest.headers[a]=parseInt(o.util.date.unixTimestamp()+e,10).toString();}}function i(t){var e=t.httpRequest.endpoint,r=o.util.urlParse(t.httpRequest.path),n={};r.search&&(n=o.util.queryStringParse(r.search.substr(1))),o.util.each(t.httpRequest.headers,function(t,e){t===a&&(t="Expires"),0===t.indexOf("x-amz-meta-")&&(t=t.toLowerCase()),n[t]=e;}),delete t.httpRequest.headers[a];var i=n.Authorization.split(" ");if("AWS"===i[0])i=i[1].split(":"),n.AWSAccessKeyId=i[0],n.Signature=i[1];else if("AWS4-HMAC-SHA256"===i[0]){i.shift();var s=i.join(" "),u=s.match(/Signature=(.*?)(?:,|\s|\r?\n|$)/)[1];n["X-Amz-Signature"]=u,delete n.Expires;}delete n.Authorization,delete n.Host,e.pathname=r.pathname,e.search=o.util.queryParamsToString(n);}var o=t("../core"),s=o.util.inherit,a="presigned-expires";o.Signers.Presign=s({sign:function sign(t,e,r){if(t.httpRequest.headers[a]=e||3600,t.on("build",n),t.on("sign",i),t.removeListener("afterBuild",o.EventListeners.Core.SET_CONTENT_LENGTH),t.removeListener("afterBuild",o.EventListeners.Core.COMPUTE_SHA256),t.emit("beforePresign",[t]),!r){if(t.build(),t.response.error)throw t.response.error;return o.util.urlFormat(t.httpRequest.endpoint);}t.build(function(){this.response.error?r(this.response.error):r(null,o.util.urlFormat(t.httpRequest.endpoint));});}}),e.exports=o.Signers.Presign;},{"../core":24}],61:[function(t,e,r){var n=t("./core"),i=t("./model/api"),o=t("./region_config"),s=n.util.inherit;n.Service=s({constructor:function constructor(t){if(!this.loadServiceClass)throw n.util.error(new Error(),"Service must be constructed with `new' operator");var e=this.loadServiceClass(t||{});return e?new e(t):void this.initialize(t);},initialize:function initialize(t){var e=n.config[this.serviceIdentifier];this.config=new n.Config(n.config),e&&this.config.update(e,!0),t&&this.config.update(t,!0),this.validateService(),this.config.endpoint||o(this),this.config.endpoint=this.endpointFromTemplate(this.config.endpoint),this.setEndpoint(this.config.endpoint);},validateService:function validateService(){},loadServiceClass:function loadServiceClass(t){var e=t;if(n.util.isEmpty(this.api)){if(e.apiConfig)return n.Service.defineServiceApi(this.constructor,e.apiConfig);if(this.constructor.services){e=new n.Config(n.config),e.update(t,!0);var r=e.apiVersions[this.constructor.serviceIdentifier];return r=r||e.apiVersion,this.getLatestServiceClass(r);}return null;}return null;},getLatestServiceClass:function getLatestServiceClass(t){return t=this.getLatestServiceVersion(t),null===this.constructor.services[t]&&n.Service.defineServiceApi(this.constructor,t),this.constructor.services[t];},getLatestServiceVersion:function getLatestServiceVersion(t){if(!this.constructor.services||0===this.constructor.services.length)throw new Error("No services defined on "+this.constructor.serviceIdentifier);if(t?n.util.isType(t,Date)&&(t=n.util.date.iso8601(t).split("T")[0]):t="latest",Object.hasOwnProperty(this.constructor.services,t))return t;for(var e=Object.keys(this.constructor.services).sort(),r=null,i=e.length-1;i>=0;i--){if("*"!==e[i][e[i].length-1]&&(r=e[i]),e[i].substr(0,10)<=t)return r;}throw new Error("Could not find "+this.constructor.serviceIdentifier+" API to satisfy version constraint `"+t+"'");},api:{},defaultRetryCount:3,makeRequest:function makeRequest(t,e,r){if("function"==typeof e&&(r=e,e=null),e=e||{},this.config.params){var i=this.api.operations[t];i&&(e=n.util.copy(e),n.util.each(this.config.params,function(t,r){i.input.members[t]&&(void 0===e[t]||null===e[t])&&(e[t]=r);}));}var o=new n.Request(this,t,e);return this.addAllRequestListeners(o),r&&o.send(r),o;},makeUnauthenticatedRequest:function makeUnauthenticatedRequest(t,e,r){"function"==typeof e&&(r=e,e={});var n=this.makeRequest(t,e).toUnauthenticated();return r?n.send(r):n;},waitFor:function waitFor(t,e,r){var i=new n.ResourceWaiter(this,t);return i.wait(e,r);},addAllRequestListeners:function addAllRequestListeners(t){for(var e=[n.events,n.EventListeners.Core,this.serviceInterface(),n.EventListeners.CorePost],r=0;r<e.length;r++){e[r]&&t.addListeners(e[r]);}this.config.paramValidation||t.removeListener("validate",n.EventListeners.Core.VALIDATE_PARAMETERS),this.config.logger&&t.addListeners(n.EventListeners.Logger),this.setupRequestListeners(t);},setupRequestListeners:function setupRequestListeners(){},getSignerClass:function getSignerClass(){var t;return t=this.config.signatureVersion?this.config.signatureVersion:this.api.signatureVersion,n.Signers.RequestSigner.getVersion(t);},serviceInterface:function serviceInterface(){switch(this.api.protocol){case "ec2":return n.EventListeners.Query;case "query":return n.EventListeners.Query;case "json":return n.EventListeners.Json;case "rest-json":return n.EventListeners.RestJson;case "rest-xml":return n.EventListeners.RestXml;}if(this.api.protocol)throw new Error("Invalid service `protocol' "+this.api.protocol+" in API config");},successfulResponse:function successfulResponse(t){return t.httpResponse.statusCode<300;},numRetries:function numRetries(){return void 0!==this.config.maxRetries?this.config.maxRetries:this.defaultRetryCount;},retryDelays:function retryDelays(t){var e=this.config.retryDelayOptions||{},r=e.customBackoff||null;if("function"==typeof r)return r(t);var n=e.base||30,i=Math.random()*Math.pow(2,t)*n;return i;},retryableError:function retryableError(t){return this.networkingError(t)?!0:this.expiredCredentialsError(t)?!0:this.throttledError(t)?!0:t.statusCode>=500?!0:!1;},networkingError:function networkingError(t){return "NetworkingError"===t.code;},expiredCredentialsError:function expiredCredentialsError(t){return "ExpiredTokenException"===t.code;},clockSkewError:function clockSkewError(t){switch(t.code){case "RequestTimeTooSkewed":case "RequestExpired":case "InvalidSignatureException":case "SignatureDoesNotMatch":case "AuthFailure":case "RequestInTheFuture":return !0;default:return !1;}},throttledError:function throttledError(t){switch(t.code){case "ProvisionedThroughputExceededException":case "Throttling":case "ThrottlingException":case "RequestLimitExceeded":case "RequestThrottled":return !0;default:return !1;}},endpointFromTemplate:function endpointFromTemplate(t){if("string"!=typeof t)return t;var e=t;return e=e.replace(/\{service\}/g,this.api.endpointPrefix),e=e.replace(/\{region\}/g,this.config.region),e=e.replace(/\{scheme\}/g,this.config.sslEnabled?"https":"http");},setEndpoint:function setEndpoint(t){this.endpoint=new n.Endpoint(t,this.config);},paginationConfig:function paginationConfig(t,e){var r=this.api.operations[t].paginator;if(!r){if(e){var i=new Error();throw n.util.error(i,"No pagination configuration for "+t);}return null;}return r;}}),n.util.update(n.Service,{defineMethods:function defineMethods(t){n.util.each(t.prototype.api.operations,function(e){t.prototype[e]||(t.prototype[e]=function(t,r){return this.makeRequest(e,t,r);});});},defineService:function defineService(t,e,r){n.Service._serviceMap[t]=!0,Array.isArray(e)||(r=e,e=[]);var i=s(n.Service,r||{});if("string"==typeof t){n.Service.addVersions(i,e);var o=i.serviceIdentifier||t;i.serviceIdentifier=o;}else i.prototype.api=t,n.Service.defineMethods(i);return i;},addVersions:function addVersions(t,e){Array.isArray(e)||(e=[e]),t.services=t.services||{};for(var r=0;r<e.length;r++){void 0===t.services[e[r]]&&(t.services[e[r]]=null);}t.apiVersions=Object.keys(t.services).sort();},defineServiceApi:function defineServiceApi(t,e,r){function o(t){t.isApi?a.prototype.api=t:a.prototype.api=new i(t);}var a=s(t,{serviceIdentifier:t.serviceIdentifier});if("string"==typeof e){if(r)o(r);else try{o(n.apiLoader(t.serviceIdentifier,e));}catch(u){throw n.util.error(u,{message:"Could not find API configuration "+t.serviceIdentifier+"-"+e});}t.services.hasOwnProperty(e)||(t.apiVersions=t.apiVersions.concat(e).sort()),t.services[e]=a;}else o(e);return n.Service.defineMethods(a),a;},hasService:function hasService(t){return n.Service._serviceMap.hasOwnProperty(t);},_serviceMap:{}});},{"./core":24,"./model/api":41,"./region_config":55}],55:[function(t,e,r){function n(t){if(!t)return null;var e=t.split("-");return e.length<3?null:e.slice(0,e.length-2).join("-")+"-*";}function i(t){var e=t.config.region,r=n(e),i=t.api.endpointPrefix;return [[e,i],[r,i],[e,"*"],[r,"*"],["*",i],["*","*"]].map(function(t){return t[0]&&t[1]?t.join("/"):null;});}function o(t,e){a.each(e,function(e,r){"globalEndpoint"!==e&&(void 0===t.config[e]||null===t.config[e])&&(t.config[e]=r);});}function s(t){for(var e=i(t),r=0;r<e.length;r++){var n=e[r];if(n&&u.rules.hasOwnProperty(n)){var s=u.rules[n];return "string"==typeof s&&(s=u.patterns[s]),t.isGlobalEndpoint=!!s.globalEndpoint,s.signatureVersion||(s.signatureVersion="v4"),void o(t,s);}}}var a=t("./util"),u=t("./region_config.json");e.exports=s;},{"./region_config.json":54,"./util":84}],54:[function(t,e,r){e.exports={rules:{"*/*":{endpoint:"{service}.{region}.amazonaws.com"},"cn-*/*":{endpoint:"{service}.{region}.amazonaws.com.cn"},"*/cloudfront":"globalSSL","*/iam":"globalSSL","*/sts":"globalSSL","*/importexport":{endpoint:"{service}.amazonaws.com",signatureVersion:"v2",globalEndpoint:!0},"*/route53":{endpoint:"https://{service}.amazonaws.com",signatureVersion:"v3https",globalEndpoint:!0},"*/waf":"globalSSL","us-gov-*/iam":"globalGovCloud","us-gov-*/sts":{endpoint:"{service}.{region}.amazonaws.com"},"us-gov-west-1/s3":"s3dash","us-west-1/s3":"s3dash","us-west-2/s3":"s3dash","eu-west-1/s3":"s3dash","ap-southeast-1/s3":"s3dash","ap-southeast-2/s3":"s3dash","ap-northeast-1/s3":"s3dash","sa-east-1/s3":"s3dash","us-east-1/s3":{endpoint:"{service}.amazonaws.com",signatureVersion:"s3"},"us-east-1/sdb":{endpoint:"{service}.amazonaws.com",signatureVersion:"v2"},"*/sdb":{endpoint:"{service}.{region}.amazonaws.com",signatureVersion:"v2"}},patterns:{globalSSL:{endpoint:"https://{service}.amazonaws.com",globalEndpoint:!0},globalGovCloud:{endpoint:"{service}.us-gov.amazonaws.com"},s3dash:{endpoint:"{service}-{region}.amazonaws.com",signatureVersion:"s3"}}};},{}],58:[function(t,e,r){var n=t("./core"),i=n.util.inherit;n.Response=i({constructor:function constructor(t){this.request=t,this.data=null,this.error=null,this.retryCount=0,this.redirectCount=0,this.httpResponse=new n.HttpResponse(),t&&(this.maxRetries=t.service.numRetries(),this.maxRedirects=t.service.config.maxRedirects);},nextPage:function nextPage(t){var e,r=this.request.service,i=this.request.operation;try{e=r.paginationConfig(i,!0);}catch(o){this.error=o;}if(!this.hasNextPage()){if(t)t(this.error,null);else if(this.error)throw this.error;return null;}var s=n.util.copy(this.request.params);if(this.nextPageTokens){var a=e.inputToken;"string"==typeof a&&(a=[a]);for(var u=0;u<a.length;u++){s[a[u]]=this.nextPageTokens[u];}return r.makeRequest(this.request.operation,s,t);}return t?t(null,null):null;},hasNextPage:function hasNextPage(){return this.cacheNextPageTokens(),this.nextPageTokens?!0:void 0===this.nextPageTokens?void 0:!1;},cacheNextPageTokens:function cacheNextPageTokens(){if(this.hasOwnProperty("nextPageTokens"))return this.nextPageTokens;this.nextPageTokens=void 0;var t=this.request.service.paginationConfig(this.request.operation);if(!t)return this.nextPageTokens;if(this.nextPageTokens=null,t.moreResults&&!n.util.jamespath.find(t.moreResults,this.data))return this.nextPageTokens;var e=t.outputToken;return "string"==typeof e&&(e=[e]),n.util.arrayEach.call(this,e,function(t){var e=n.util.jamespath.find(t,this.data);e&&(this.nextPageTokens=this.nextPageTokens||[],this.nextPageTokens.push(e));}),this.nextPageTokens;}});},{"./core":24}],57:[function(t,e,r){var n=t("./core"),i=n.util.inherit;n.ResourceWaiter=i({constructor:function constructor(t,e){this.service=t,this.state=e,"object"==_typeof(this.state)&&n.util.each.call(this,this.state,function(t,e){this.state=t,this.expectedValue=e;}),this.loadWaiterConfig(this.state),this.expectedValue||(this.expectedValue=this.config.successValue);},service:null,state:null,expectedValue:null,config:null,waitDone:!1,Listeners:{retry:new n.SequentialExecutor().addNamedListeners(function(t){t("RETRY_CHECK","retry",function(t){var e=t.request._waiter;t.error&&"ResourceNotReady"===t.error.code&&(t.error.retryDelay=1e3*e.config.interval);});}),output:new n.SequentialExecutor().addNamedListeners(function(t){t("CHECK_OUT_ERROR","extractError",function(t){t.error&&t.request._waiter.setError(t,!0);}),t("CHECK_OUTPUT","extractData",function(t){var e=t.request._waiter,r=e.checkSuccess(t);r?t.error=null:e.setError(t,null===r?!1:!0);});}),error:new n.SequentialExecutor().addNamedListeners(function(t){t("CHECK_ERROR","extractError",function(t){var e=t.request._waiter,r=e.checkError(t);r?(t.error=null,t.data={},t.request.removeAllListeners("extractData")):e.setError(t,null===r?!1:!0);}),t("CHECK_ERR_OUTPUT","extractData",function(t){t.request._waiter.setError(t,!0);});})},wait:function wait(t,e){"function"==typeof t&&(e=t,t=void 0);var r=this.service.makeRequest(this.config.operation,t),n=this.Listeners[this.config.successType];return r._waiter=this,r.response.maxRetries=this.config.maxAttempts,r.addListeners(this.Listeners.retry),n&&r.addListeners(n),e&&r.send(e),r;},setError:function setError(t,e){t.data=null,t.error=n.util.error(t.error||new Error(),{code:"ResourceNotReady",message:"Resource is not in the state "+this.state,retryable:e});},checkSuccess:function checkSuccess(t){if(!this.config.successPath)return t.httpResponse.statusCode<300;var e=n.util.jamespath.find(this.config.successPath,t.data);return this.config.failureValue&&this.config.failureValue.indexOf(e)>=0?null:this.expectedValue?e===this.expectedValue:e?!0:!1;},checkError:function checkError(t){var e=this.config.successValue;return "number"==typeof e?t.httpResponse.statusCode===e:t.error&&t.error.code===e;},loadWaiterConfig:function loadWaiterConfig(t,e){if(!this.service.api.waiters[t]){if(e)return;throw new n.util.error(new Error(),{code:"StateNotFoundError",message:"State "+t+" not found."});}this.config=this.service.api.waiters[t];var r=this.config;!function(){r.successType=r.successType||r.acceptorType,r.successPath=r.successPath||r.acceptorPath,r.successValue=r.successValue||r.acceptorValue,r.failureType=r.failureType||r.acceptorType,r.failurePath=r.failurePath||r.acceptorPath,r.failureValue=r.failureValue||r.acceptorValue;}();}});},{"./core":24}],56:[function(t,e,r){(function(e){function r(t){return a.hasOwnProperty(t._asm.currentState);}var n=t("./core"),i=t("./state_machine"),o=n.util.inherit,s=n.util.nodeRequire("domain"),a={success:1,error:1,complete:1},u=new i();u.setupStates=function(){var t=function t(_t,e){var n=this;n._haltHandlersOnError=!1,n.emit(n._asm.currentState,function(t){if(t){if(r(n)){if(!(s&&n.domain instanceof s.Domain))throw t;t.domainEmitter=n,t.domain=n.domain,t.domainThrown=!1,n.domain.emit("error",t);}else n.response.error=t,e(t);}else e(n.response.error);});};this.addState("validate","build","error",t),this.addState("build","afterBuild","restart",t),this.addState("afterBuild","sign","restart",t),this.addState("sign","send","retry",t),this.addState("retry","afterRetry","afterRetry",t),this.addState("afterRetry","sign","error",t),this.addState("send","validateResponse","retry",t),this.addState("validateResponse","extractData","extractError",t),this.addState("extractError","extractData","retry",t),this.addState("extractData","success","retry",t),this.addState("restart","build","error",t),this.addState("success","complete","complete",t),this.addState("error","complete","complete",t),this.addState("complete",null,null,t);},u.setupStates(),n.Request=o({constructor:function constructor(t,e,r){var o=t.endpoint,a=t.config.region,c=t.config.customUserAgent;t.isGlobalEndpoint&&(a="us-east-1"),this.domain=s&&s.active,this.service=t,this.operation=e,this.params=r||{},this.httpRequest=new n.HttpRequest(o,a,c),this.startTime=n.util.date.getDate(),this.response=new n.Response(this),this._asm=new i(u.states,"validate"),this._haltHandlersOnError=!1,n.SequentialExecutor.call(this),this.emit=this.emitEvent;},send:function send(t){return t&&this.on("complete",function(e){t.call(e,e.error,e.data);}),this.runTo(),this.response;},build:function build(t){return this.runTo("send",t);},runTo:function runTo(t,e){return this._asm.runTo(t,e,this),this;},abort:function abort(){return this.removeAllListeners("validateResponse"),this.removeAllListeners("extractError"),this.on("validateResponse",function(t){t.error=n.util.error(new Error("Request aborted by user"),{code:"RequestAbortedError",retryable:!1});}),this.httpRequest.stream&&(this.httpRequest.stream.abort(),this.httpRequest._abortCallback?this.httpRequest._abortCallback():this.removeAllListeners("send")),this;},eachPage:function eachPage(t){function e(r){t.call(r,r.error,r.data,function(i){i!==!1&&(r.hasNextPage()?r.nextPage().on("complete",e).send():t.call(r,null,null,n.util.fn.noop));});}t=n.util.fn.makeAsync(t,3),this.on("complete",e).send();},eachItem:function eachItem(t){function e(e,i){if(e)return t(e,null);if(null===i)return t(null,null);var o=r.service.paginationConfig(r.operation),s=o.resultKey;Array.isArray(s)&&(s=s[0]);var a=n.util.jamespath.query(s,i);n.util.arrayEach(a,function(e){n.util.arrayEach(e,function(e){t(null,e);});});}var r=this;this.eachPage(e);},isPageable:function isPageable(){return this.service.paginationConfig(this.operation)?!0:!1;},createReadStream:function createReadStream(){var t=n.util.nodeRequire("stream"),r=this,i=null;return 2===n.HttpClient.streamsApiVersion?(i=new t.PassThrough(),r.send()):(i=new t.Stream(),i.readable=!0,i.sent=!1,i.on("newListener",function(t){i.sent||"data"!==t||(i.sent=!0,e.nextTick(function(){r.send();}));})),this.on("httpHeaders",function(t,e,o){if(300>t){r.removeListener("httpData",n.EventListeners.Core.HTTP_DATA),r.removeListener("httpError",n.EventListeners.Core.HTTP_ERROR),r.on("httpError",function(t){o.error=t,o.error.retryable=!1;});var s=o.httpResponse.createUnbufferedStream();2===n.HttpClient.streamsApiVersion?s.pipe(i):(s.on("data",function(t){i.emit("data",t);}),s.on("end",function(){i.emit("end");})),s.on("error",function(t){i.emit("error",t);});}}),this.on("error",function(t){i.emit("error",t);}),i;},emitEvent:function emitEvent(t,e,r){"function"==typeof e&&(r=e,e=null),r||(r=function r(){}),e||(e=this.eventParameters(t,this.response));var i=n.SequentialExecutor.prototype.emit;i.call(this,t,e,function(t){t&&(this.response.error=t),r.call(this,t);});},eventParameters:function eventParameters(t){switch(t){case "restart":case "validate":case "sign":case "build":case "afterValidate":case "afterBuild":return [this];case "error":return [this.response.error,this.response];default:return [this.response];}},presign:function presign(t,e){return e||"function"!=typeof t||(e=t,t=null),new n.Signers.Presign().sign(this.toGet(),t,e);},toUnauthenticated:function toUnauthenticated(){return this.removeListener("validate",n.EventListeners.Core.VALIDATE_CREDENTIALS),this.removeListener("sign",n.EventListeners.Core.SIGN),this;},toGet:function toGet(){return ("query"===this.service.api.protocol||"ec2"===this.service.api.protocol)&&(this.removeListener("build",this.buildAsGet),this.addListener("build",this.buildAsGet)),this;},buildAsGet:function buildAsGet(t){t.httpRequest.method="GET",t.httpRequest.path=t.service.endpoint.path+"?"+t.httpRequest.body,t.httpRequest.body="",delete t.httpRequest.headers["Content-Length"],delete t.httpRequest.headers["Content-Type"];},haltHandlersOnError:function haltHandlersOnError(){this._haltHandlersOnError=!0;}}),n.util.mixin(n.Request,n.SequentialExecutor);}).call(this,t("_process"));},{"./core":24,"./state_machine":83,_process:13}],83:[function(t,e,r){function n(t,e){this.currentState=e||null,this.states=t||{};}n.prototype.runTo=function(t,e,r,n){"function"==typeof t&&(n=r,r=e,e=t,t=null);var i=this,o=i.states[i.currentState];o.fn.call(r||i,n,function(n){if(n){if(!o.fail)return e?e.call(r,n):null;i.currentState=o.fail;}else {if(!o.accept)return e?e.call(r):null;i.currentState=o.accept;}return i.currentState===t?e?e.call(r,n):null:void i.runTo(t,e,r,n);});},n.prototype.addState=function(t,e,r,n){return "function"==typeof e?(n=e,e=null,r=null):"function"==typeof r&&(n=r,r=null),this.currentState||(this.currentState=t),this.states[t]={accept:e,fail:r,fn:n},this;},e.exports=n;},{}],47:[function(t,e,r){var n=t("./core");n.ParamValidator=n.util.inherit({constructor:function constructor(t){(t===!0||void 0===t)&&(t={min:!0}),this.validation=t;},validate:function validate(t,e,r){if(this.errors=[],this.validateMember(t,e||{},r||"params"),this.errors.length>1){var i=this.errors.join("\n* ");throw i="There were "+this.errors.length+" validation errors:\n* "+i,n.util.error(new Error(i),{code:"MultipleValidationErrors",errors:this.errors});}if(1===this.errors.length)throw this.errors[0];return !0;},fail:function fail(t,e){this.errors.push(n.util.error(new Error(e),{code:t}));},validateStructure:function validateStructure(t,e,r){this.validateType(e,r,["object"],"structure");for(var n,i=0;t.required&&i<t.required.length;i++){n=t.required[i];var o=e[n];(void 0===o||null===o)&&this.fail("MissingRequiredParameter","Missing required key '"+n+"' in "+r);}for(n in e){if(e.hasOwnProperty(n)){var s=e[n],a=t.members[n];if(void 0!==a){var u=[r,n].join(".");this.validateMember(a,s,u);}else this.fail("UnexpectedParameter","Unexpected key '"+n+"' found in "+r);}}return !0;},validateMember:function validateMember(t,e,r){switch(t.type){case "structure":return this.validateStructure(t,e,r);case "list":return this.validateList(t,e,r);case "map":return this.validateMap(t,e,r);default:return this.validateScalar(t,e,r);}},validateList:function validateList(t,e,r){if(this.validateType(e,r,[Array])){this.validateRange(t,e.length,r,"list member count");for(var n=0;n<e.length;n++){this.validateMember(t.member,e[n],r+"["+n+"]");}}},validateMap:function validateMap(t,e,r){if(this.validateType(e,r,["object"],"map")){var n=0;for(var i in e){e.hasOwnProperty(i)&&(this.validateMember(t.key,i,r+"[key='"+i+"']"),this.validateMember(t.value,e[i],r+"['"+i+"']"),n++);}this.validateRange(t,n,r,"map member count");}},validateScalar:function validateScalar(t,e,r){switch(t.type){case null:case void 0:case "string":return this.validateString(t,e,r);case "base64":case "binary":return this.validatePayload(e,r);case "integer":case "float":return this.validateNumber(t,e,r);case "boolean":return this.validateType(e,r,["boolean"]);case "timestamp":return this.validateType(e,r,[Date,/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/,"number"],"Date object, ISO-8601 string, or a UNIX timestamp");default:return this.fail("UnkownType","Unhandled type "+t.type+" for "+r);}},validateString:function validateString(t,e,r){this.validateType(e,r,["string"])&&(this.validateEnum(t,e,r),this.validateRange(t,e.length,r,"string length"),this.validatePattern(t,e,r));},validatePattern:function validatePattern(t,e,r){this.validation.pattern&&void 0!==t.pattern&&(new RegExp(t.pattern).test(e)||this.fail("PatternMatchError",'Provided value "'+e+'" does not match regex pattern /'+t.pattern+"/ for "+r));},validateRange:function validateRange(t,e,r,n){this.validation.min&&void 0!==t.min&&e<t.min&&this.fail("MinRangeError","Expected "+n+" >= "+t.min+", but found "+e+" for "+r),this.validation.max&&void 0!==t.max&&e>t.max&&this.fail("MaxRangeError","Expected "+n+" <= "+t.max+", but found "+e+" for "+r);},validateEnum:function validateEnum(t,e,r){this.validation["enum"]&&void 0!==t["enum"]&&-1===t["enum"].indexOf(e)&&this.fail("EnumError","Found string value of "+e+", but expected "+t["enum"].join("|")+" for "+r);},validateType:function validateType(t,e,r,i){if(null===t||void 0===t)return !1;for(var o=!1,s=0;s<r.length;s++){if("string"==typeof r[s]){if((typeof t==="undefined"?"undefined":_typeof(t))===r[s])return !0;}else if(r[s] instanceof RegExp){if((t||"").toString().match(r[s]))return !0;}else {if(t instanceof r[s])return !0;if(n.util.isType(t,r[s]))return !0;i||o||(r=r.slice()),r[s]=n.util.typeName(r[s]);}o=!0;}var a=i;a||(a=r.join(", ").replace(/,([^,]+)$/,", or$1"));var u=a.match(/^[aeiou]/i)?"n":"";return this.fail("InvalidParameterType","Expected "+e+" to be a"+u+" "+a),!1;},validateNumber:function validateNumber(t,e,r){if(null!==e&&void 0!==e){if("string"==typeof e){var n=parseFloat(e);n.toString()===e&&(e=n);}this.validateType(e,r,["number"])&&this.validateRange(t,e,r,"numeric value");}},validatePayload:function validatePayload(t,e){if(null!==t&&void 0!==t&&"string"!=typeof t&&(!t||"number"!=typeof t.byteLength)){if(n.util.isNode()){var r=n.util.nodeRequire("stream").Stream;if(n.util.Buffer.isBuffer(t)||t instanceof r)return;}var i=["Buffer","Stream","File","Blob","ArrayBuffer","DataView"];if(t)for(var o=0;o<i.length;o++){if(n.util.isType(t,i[o]))return;if(n.util.typeName(t.constructor)===i[o])return;}this.fail("InvalidParameterType","Expected "+e+" to be a string, Buffer, Stream, Blob, or typed array object");}}});},{"./core":24}],41:[function(t,e,r){function n(t,e){t=t||{},e=e||{},e.api=this,t.metadata=t.metadata||{},l(this,"isApi",!0,!1),l(this,"apiVersion",t.metadata.apiVersion),l(this,"endpointPrefix",t.metadata.endpointPrefix),l(this,"signingName",t.metadata.signingName),l(this,"globalEndpoint",t.metadata.globalEndpoint),l(this,"signatureVersion",t.metadata.signatureVersion),l(this,"jsonVersion",t.metadata.jsonVersion),l(this,"targetPrefix",t.metadata.targetPrefix),l(this,"protocol",t.metadata.protocol),l(this,"timestampFormat",t.metadata.timestampFormat),l(this,"xmlNamespaceUri",t.metadata.xmlNamespace),l(this,"abbreviation",t.metadata.serviceAbbreviation),l(this,"fullName",t.metadata.serviceFullName),h(this,"className",function(){var e=t.metadata.serviceAbbreviation||t.metadata.serviceFullName;return e?(e=e.replace(/^Amazon|AWS\s*|\(.*|\s+|\W+/g,""),"ElasticLoadBalancing"===e&&(e="ELB"),e):null;}),l(this,"operations",new i(t.operations,e,function(t,r){return new o(t,r,e);},c.string.lowerFirst)),l(this,"shapes",new i(t.shapes,e,function(t,r){return s.create(r,e);})),l(this,"paginators",new i(t.paginators,e,function(t,r){return new a(t,r,e);})),l(this,"waiters",new i(t.waiters,e,function(t,r){return new u(t,r,e);},c.string.lowerFirst)),e.documentation&&(l(this,"documentation",t.documentation),l(this,"documentationUrl",t.documentationUrl));}var i=t("./collection"),o=t("./operation"),s=t("./shape"),a=t("./paginator"),u=t("./resource_waiter"),c=t("../util"),l=c.property,h=c.memoizedProperty;e.exports=n;},{"../util":84,"./collection":42,"./operation":43,"./paginator":44,"./resource_waiter":45,"./shape":46}],45:[function(t,e,r){function n(t,e,r){function n(){o(this,"name",t),o(this,"api",r.api,!1),e.operation&&o(this,"operation",i.string.lowerFirst(e.operation));var n=this,s={ignoreErrors:"ignore_errors",successType:"success_type",successValue:"success_value",successPath:"success_path",acceptorType:"acceptor_type",acceptorValue:"acceptor_value",acceptorPath:"acceptor_path",failureType:"failure_type",failureValue:"failure_value",failurePath:"success_path",interval:"interval",maxAttempts:"max_attempts"};Object.keys(s).forEach(function(t){var r=e[s[t]];r&&o(n,t,r);});}if(r=r||{},r.api){var s=null;e["extends"]?s=r.api.waiters[e["extends"]]:"__default__"!==t&&(s=r.api.waiters.__default__),s&&(n.prototype=s);}return new n();}var i=t("../util"),o=i.property;e.exports=n;},{"../util":84}],44:[function(t,e,r){function n(t,e){i(this,"inputToken",e.input_token),i(this,"limitKey",e.limit_key),i(this,"moreResults",e.more_results),i(this,"outputToken",e.output_token),i(this,"resultKey",e.result_key);}var i=t("../util").property;e.exports=n;},{"../util":84}],43:[function(t,e,r){function n(t,e,r){r=r||{},s(this,"name",e.name||t),s(this,"api",r.api,!1),e.http=e.http||{},s(this,"httpMethod",e.http.method||"POST"),s(this,"httpPath",e.http.requestUri||"/"),a(this,"input",function(){return e.input?i.create(e.input,r):new i.create({type:"structure"},r);}),a(this,"output",function(){return e.output?i.create(e.output,r):new i.create({type:"structure"},r);}),a(this,"errors",function(){var t=[];if(!e.errors)return null;for(var n=0;n<e.errors.length;n++){t.push(i.create(e.errors[n],r));}return t;}),a(this,"paginator",function(){return r.api.paginators[t];}),r.documentation&&(s(this,"documentation",e.documentation),s(this,"documentationUrl",e.documentationUrl));}var i=t("./shape"),o=t("../util"),s=o.property,a=o.memoizedProperty;e.exports=n;},{"../util":84,"./shape":46}],37:[function(t,e,r){var n=t("./core"),i=n.util.inherit;n.Endpoint=i({constructor:function constructor(t,e){if(n.util.hideProperties(this,["slashes","auth","hash","search","query"]),"undefined"==typeof t||null===t)throw new Error("Invalid endpoint: "+t);if("string"!=typeof t)return n.util.copy(t);if(!t.match(/^http/)){var r=e&&void 0!==e.sslEnabled?e.sslEnabled:n.config.sslEnabled;t=(r?"https":"http")+"://"+t;}n.util.update(this,n.util.urlParse(t)),this.port?this.port=parseInt(this.port,10):this.port="https:"===this.protocol?443:80;}}),n.HttpRequest=i({constructor:function constructor(t,e,r){t=new n.Endpoint(t),this.method="POST",this.path=t.path||"/",this.headers={},this.body="",this.endpoint=t,this.region=e,this.setUserAgent(r);},setUserAgent:function setUserAgent(t){var e=n.util.isBrowser()?"X-Amz-":"",r="";"string"==typeof t&&t&&(r+=" "+t),this.headers[e+"User-Agent"]=n.util.userAgent()+r;},pathname:function pathname(){return this.path.split("?",1)[0];},search:function search(){var t=this.path.split("?",2)[1];return t?(t=n.util.queryStringParse(t),n.util.queryParamsToString(t)):"";}}),n.HttpResponse=i({constructor:function constructor(){this.statusCode=void 0,this.headers={},this.body=void 0,this.streaming=!1,this.stream=null;},createUnbufferedStream:function createUnbufferedStream(){return this.streaming=!0,this.stream;}}),n.HttpClient=i({}),n.HttpClient.getInstance=function(){return void 0===this.singleton&&(this.singleton=new this()),this.singleton;};},{"./core":24}],36:[function(t,e,r){var n=t("./core"),i=t("./sequential_executor");n.EventListeners={Core:{}},n.EventListeners={Core:new i().addNamedListeners(function(t,e){e("VALIDATE_CREDENTIALS","validate",function(t,e){return t.service.api.signatureVersion?void t.service.config.getCredentials(function(r){r&&(t.response.error=n.util.error(r,{code:"CredentialsError",message:"Missing credentials in config"})),e();}):e();}),t("VALIDATE_REGION","validate",function(t){t.service.config.region||t.service.isGlobalEndpoint||(t.response.error=n.util.error(new Error(),{code:"ConfigError",message:"Missing region in config"}));}),t("VALIDATE_PARAMETERS","validate",function(t){var e=t.service.api.operations[t.operation].input,r=t.service.config.paramValidation;new n.ParamValidator(r).validate(e,t.params);}),e("COMPUTE_SHA256","afterBuild",function(t,e){if(t.haltHandlersOnError(),!t.service.api.signatureVersion)return e();if(t.service.getSignerClass(t)===n.Signers.V4){var r=t.httpRequest.body||"";n.util.computeSha256(r,function(r,n){r?e(r):(t.httpRequest.headers["X-Amz-Content-Sha256"]=n,e());});}else e();}),t("SET_CONTENT_LENGTH","afterBuild",function(t){if(void 0===t.httpRequest.headers["Content-Length"]){var e=n.util.string.byteLength(t.httpRequest.body);t.httpRequest.headers["Content-Length"]=e;}}),t("SET_HTTP_HOST","afterBuild",function(t){t.httpRequest.headers.Host=t.httpRequest.endpoint.host;}),t("RESTART","restart",function(){var t=this.response.error;t&&t.retryable&&(this.httpRequest=new n.HttpRequest(this.service.endpoint,this.service.region),this.response.retryCount<this.service.config.maxRetries?this.response.retryCount++:this.response.error=null);}),e("SIGN","sign",function(t,e){return t.service.api.signatureVersion?void t.service.config.getCredentials(function(r,i){if(r)return t.response.error=r,e();try{var o=n.util.date.getDate(),s=t.service.getSignerClass(t),a=new s(t.httpRequest,t.service.api.signingName||t.service.api.endpointPrefix,t.service.config.signatureCache);delete t.httpRequest.headers.Authorization,delete t.httpRequest.headers.Date,delete t.httpRequest.headers["X-Amz-Date"],a.addAuthorization(i,o),t.signedAt=o;}catch(u){t.response.error=u;}e();}):e();}),t("VALIDATE_RESPONSE","validateResponse",function(t){this.service.successfulResponse(t,this)?(t.data={},t.error=null):(t.data=null,t.error=n.util.error(new Error(),{code:"UnknownError",message:"An unknown error occurred."}));}),e("SEND","send",function(t,e){function r(r){t.httpResponse.stream=r,r.on("headers",function(e,i){t.request.emit("httpHeaders",[e,i,t]),t.httpResponse.streaming||(2===n.HttpClient.streamsApiVersion?r.on("readable",function(){var e=r.read();null!==e&&t.request.emit("httpData",[e,t]);}):r.on("data",function(e){t.request.emit("httpData",[e,t]);}));}),r.on("end",function(){t.request.emit("httpDone"),e();});}function i(e){e.on("sendProgress",function(e){t.request.emit("httpUploadProgress",[e,t]);}),e.on("receiveProgress",function(e){t.request.emit("httpDownloadProgress",[e,t]);});}function o(r){t.error=n.util.error(r,{code:"NetworkingError",region:t.request.httpRequest.region,hostname:t.request.httpRequest.endpoint.hostname,retryable:!0}),t.request.emit("httpError",[t.error,t],function(){e();});}function s(){var e=n.HttpClient.getInstance(),s=t.request.service.config.httpOptions||{};try{var a=e.handleRequest(t.request.httpRequest,s,r,o);i(a);}catch(u){o(u);}}t.httpResponse._abortCallback=e,t.error=null,t.data=null;var a=(n.util.date.getDate()-this.signedAt)/1e3;a>=600?this.emit("sign",[this],function(t){t?e(t):s();}):s();}),t("HTTP_HEADERS","httpHeaders",function(t,e,r){r.httpResponse.statusCode=t,r.httpResponse.headers=e,r.httpResponse.body=new n.util.Buffer(""),r.httpResponse.buffers=[],r.httpResponse.numBytes=0;var i=e.date||e.Date;if(i){var o=Date.parse(i);r.request.service.config.correctClockSkew&&n.util.isClockSkewed(o)&&n.util.applyClockOffset(o);}}),t("HTTP_DATA","httpData",function(t,e){if(t){if(n.util.isNode()){e.httpResponse.numBytes+=t.length;var r=e.httpResponse.headers["content-length"],i={loaded:e.httpResponse.numBytes,total:r};e.request.emit("httpDownloadProgress",[i,e]);}e.httpResponse.buffers.push(new n.util.Buffer(t));}}),t("HTTP_DONE","httpDone",function(t){if(t.httpResponse.buffers&&t.httpResponse.buffers.length>0){var e=n.util.buffer.concat(t.httpResponse.buffers);t.httpResponse.body=e;}delete t.httpResponse.numBytes,delete t.httpResponse.buffers;}),t("FINALIZE_ERROR","retry",function(t){t.httpResponse.statusCode&&(t.error.statusCode=t.httpResponse.statusCode,void 0===t.error.retryable&&(t.error.retryable=this.service.retryableError(t.error,this)));}),t("INVALIDATE_CREDENTIALS","retry",function(t){if(t.error)switch(t.error.code){case "RequestExpired":case "ExpiredTokenException":case "ExpiredToken":t.error.retryable=!0,t.request.service.config.credentials.expired=!0;}}),t("EXPIRED_SIGNATURE","retry",function(t){var e=t.error;e&&"string"==typeof e.code&&"string"==typeof e.message&&e.code.match(/Signature/)&&e.message.match(/expired/)&&(t.error.retryable=!0);}),t("CLOCK_SKEWED","retry",function(t){t.error&&this.service.clockSkewError(t.error)&&this.service.config.correctClockSkew&&n.config.isClockSkewed&&(t.error.retryable=!0);}),t("REDIRECT","retry",function(t){t.error&&t.error.statusCode>=300&&t.error.statusCode<400&&t.httpResponse.headers.location&&(this.httpRequest.endpoint=new n.Endpoint(t.httpResponse.headers.location),this.httpRequest.headers.Host=this.httpRequest.endpoint.host,t.error.redirect=!0,t.error.retryable=!0);}),t("RETRY_CHECK","retry",function(t){t.error&&(t.error.redirect&&t.redirectCount<t.maxRedirects?t.error.retryDelay=0:t.retryCount<t.maxRetries&&(t.error.retryDelay=this.service.retryDelays(t.retryCount)||0));}),e("RESET_RETRY_STATE","afterRetry",function(t,e){var r,n=!1;t.error&&(r=t.error.retryDelay||0,t.error.retryable&&t.retryCount<t.maxRetries?(t.retryCount++,n=!0):t.error.redirect&&t.redirectCount<t.maxRedirects&&(t.redirectCount++,n=!0)),n?(t.error=null,setTimeout(e,r)):e();});}),CorePost:new i().addNamedListeners(function(t){t("EXTRACT_REQUEST_ID","extractData",n.util.extractRequestId),t("EXTRACT_REQUEST_ID","extractError",n.util.extractRequestId),t("ENOTFOUND_ERROR","httpError",function(t){if("NetworkingError"===t.code&&"ENOTFOUND"===t.errno){var e="Inaccessible host: `"+t.hostname+"'. This service may not be available in the `"+t.region+"' region.";this.response.error=n.util.error(new Error(e),{code:"UnknownEndpoint",region:t.region,hostname:t.hostname,retryable:!0,originalError:t});}});}),Logger:new i().addNamedListeners(function(e){e("LOG_REQUEST","complete",function(e){function r(){var r=n.util.date.getDate().getTime(),s=(r-i.startTime.getTime())/1e3,a=o.isTTY?!0:!1,u=e.httpResponse.statusCode,c=t("util").inspect(i.params,!0,null),l="";return a&&(l+="[33m"),l+="[AWS "+i.service.serviceIdentifier+" "+u,l+=" "+s.toString()+"s "+e.retryCount+" retries]",a&&(l+="[0;1m"),l+=" "+n.util.string.lowerFirst(i.operation),l+="("+c+")",a&&(l+="[0m"),l;}var i=e.request,o=i.service.config.logger;if(o){var s=r();"function"==typeof o.log?o.log(s):"function"==typeof o.write&&o.write(s+"\n");}});}),Json:new i().addNamedListeners(function(e){var r=t("./protocol/json");e("BUILD","build",r.buildRequest),e("EXTRACT_DATA","extractData",r.extractData),e("EXTRACT_ERROR","extractError",r.extractError);}),Rest:new i().addNamedListeners(function(e){var r=t("./protocol/rest");e("BUILD","build",r.buildRequest),e("EXTRACT_DATA","extractData",r.extractData),e("EXTRACT_ERROR","extractError",r.extractError);}),RestJson:new i().addNamedListeners(function(e){var r=t("./protocol/rest_json");e("BUILD","build",r.buildRequest),e("EXTRACT_DATA","extractData",r.extractData),e("EXTRACT_ERROR","extractError",r.extractError);}),RestXml:new i().addNamedListeners(function(e){var r=t("./protocol/rest_xml");e("BUILD","build",r.buildRequest),e("EXTRACT_DATA","extractData",r.extractData),e("EXTRACT_ERROR","extractError",r.extractError);}),Query:new i().addNamedListeners(function(e){var r=t("./protocol/query");e("BUILD","build",r.buildRequest),e("EXTRACT_DATA","extractData",r.extractData),e("EXTRACT_ERROR","extractError",r.extractError);})};},{"./core":24,"./protocol/json":48,"./protocol/query":49,"./protocol/rest":50,"./protocol/rest_json":51,"./protocol/rest_xml":52,"./sequential_executor":60,util:20}],60:[function(t,e,r){var n=t("./core");n.SequentialExecutor=n.util.inherit({constructor:function constructor(){this._events={};},listeners:function listeners(t){return this._events[t]?this._events[t].slice(0):[];},on:function on(t,e){return this._events[t]?this._events[t].push(e):this._events[t]=[e],this;},onAsync:function onAsync(t,e){return e._isAsync=!0,this.on(t,e);},removeListener:function removeListener(t,e){var r=this._events[t];if(r){for(var n=r.length,i=-1,o=0;n>o;++o){r[o]===e&&(i=o);}i>-1&&r.splice(i,1);}return this;},removeAllListeners:function removeAllListeners(t){return t?delete this._events[t]:this._events={},this;},emit:function emit(t,e,r){r||(r=function r(){});var n=this.listeners(t),i=n.length;return this.callListeners(n,e,r),i>0;},callListeners:function callListeners(t,e,r,i){function o(i){return i&&(a=n.util.error(a||new Error(),i),s._haltHandlersOnError)?r.call(s,a):void s.callListeners(t,e,r,a);}for(var s=this,a=i||null;t.length>0;){var u=t.shift();if(u._isAsync)return void u.apply(s,e.concat([o]));try{u.apply(s,e);}catch(c){a=n.util.error(a||new Error(),c);}if(a&&s._haltHandlersOnError)return void r.call(s,a);}r.call(s,a);},addListeners:function addListeners(t){var e=this;return t._events&&(t=t._events),n.util.each(t,function(t,r){"function"==typeof r&&(r=[r]),n.util.arrayEach(r,function(r){e.on(t,r);});}),e;},addNamedListener:function addNamedListener(t,e,r){return this[t]=r,this.addListener(e,r),this;},addNamedAsyncListener:function addNamedAsyncListener(t,e,r){return r._isAsync=!0,this.addNamedListener(t,e,r);},addNamedListeners:function addNamedListeners(t){var e=this;return t(function(){e.addNamedListener.apply(e,arguments);},function(){e.addNamedAsyncListener.apply(e,arguments);}),this;}}),n.SequentialExecutor.prototype.addListener=n.SequentialExecutor.prototype.on,e.exports=n.SequentialExecutor;},{"./core":24}],52:[function(t,e,r){function n(t){var e=t.service.api.operations[t.operation].input,r=new a.XML.Builder(),n=t.params,i=e.payload;if(i){var o=e.members[i];if(n=n[i],void 0===n)return;if("structure"===o.type){var s=o.name;t.httpRequest.body=r.toXML(n,o,s,!0);}else t.httpRequest.body=n;}else t.httpRequest.body=r.toXML(n,e,e.name||e.shape||u.string.upperFirst(t.operation)+"Request");}function i(t){c.buildRequest(t),["GET","HEAD"].indexOf(t.httpRequest.method)<0&&n(t);}function o(t){c.extractError(t);var e=new a.XML.Parser().parse(t.httpResponse.body.toString());e.Errors&&(e=e.Errors),e.Error&&(e=e.Error),e.Code?t.error=u.error(new Error(),{code:e.Code,message:e.Message}):t.error=u.error(new Error(),{code:t.httpResponse.statusCode,message:null});}function s(t){c.extractData(t);var e,r=t.request,n=t.httpResponse.body,i=r.service.api.operations[r.operation],o=i.output,s=o.payload;if(s){var l=o.members[s];l.isStreaming?t.data[s]=n:"structure"===l.type?(e=new a.XML.Parser(),t.data[s]=e.parse(n.toString(),l)):t.data[s]=n.toString();}else if(n.length>0){e=new a.XML.Parser();var h=e.parse(n.toString(),o);u.update(t.data,h);}}var a=t("../core"),u=t("../util"),c=t("./rest");e.exports={buildRequest:i,extractError:o,extractData:s};},{"../core":24,"../util":84,"./rest":50}],51:[function(t,e,r){function n(t){var e=new l(),r=t.service.api.operations[t.operation].input;if(r.payload){var n={},i=r.members[r.payload];if(n=t.params[r.payload],void 0===n)return;"structure"===i.type?t.httpRequest.body=e.build(n,i):t.httpRequest.body=n;}else t.httpRequest.body=e.build(t.params,r);}function i(t){u.buildRequest(t),["GET","HEAD","DELETE"].indexOf(t.httpRequest.method)<0&&n(t);}function o(t){c.extractError(t);}function s(t){u.extractData(t);var e=t.request,r=e.service.api.operations[e.operation].output||{};if(r.payload){var n=r.members[r.payload],i=t.httpResponse.body;if(n.isStreaming)t.data[r.payload]=i;else if("structure"===n.type||"list"===n.type){var o=new h();t.data[r.payload]=o.parse(i,n);}else t.data[r.payload]=i.toString();}else {var s=t.data;c.extractData(t),t.data=a.merge(s,t.data);}}var a=t("../util"),u=t("./rest"),c=t("./json"),l=t("../json/builder"),h=t("../json/parser");e.exports={buildRequest:i,extractError:o,extractData:s};},{"../json/builder":39,"../json/parser":40,"../util":84,"./json":48,"./rest":50}],50:[function(t,e,r){function n(t){t.httpRequest.method=t.service.api.operations[t.operation].httpMethod;}function i(t){var e=t.service.api.operations[t.operation],r=e.input,n=[t.httpRequest.endpoint.path,e.httpPath].join("/");n=n.replace(/\/+/g,"/");var i={},o=!1;if(c.each(r.members,function(e,r){var s=t.params[e];if(null!==s&&void 0!==s)if("uri"===r.location){var a=new RegExp("\\{"+r.name+"(\\+)?\\}");n=n.replace(a,function(t,e){var r=e?c.uriEscapePath:c.uriEscape;return r(String(s));});}else "querystring"===r.location&&(o=!0,"list"===r.type?i[r.name]=s.map(function(t){return c.uriEscape(String(t));}):"map"===r.type?c.each(s,function(t,e){Array.isArray(e)?i[t]=e.map(function(t){return c.uriEscape(String(t));}):i[t]=c.uriEscape(String(e));}):i[r.name]=c.uriEscape(String(s)));}),o){n+=n.indexOf("?")>=0?"&":"?";var s=[];c.arrayEach(Object.keys(i).sort(),function(t){Array.isArray(i[t])||(i[t]=[i[t]]);for(var e=0;e<i[t].length;e++){s.push(c.uriEscape(String(t))+"="+i[t][e]);}}),n+=s.join("&");}t.httpRequest.path=n;}function o(t){var e=t.service.api.operations[t.operation];c.each(e.input.members,function(e,r){var n=t.params[e];null!==n&&void 0!==n&&("headers"===r.location&&"map"===r.type?c.each(n,function(e,n){t.httpRequest.headers[r.name+e]=n;}):"header"===r.location&&(n=r.toWireFormat(n).toString(),t.httpRequest.headers[r.name]=n));});}function s(t){n(t),i(t),o(t);}function a(){}function u(t){var e=t.request,r={},n=t.httpResponse,i=e.service.api.operations[e.operation],o=i.output,s={};c.each(n.headers,function(t,e){s[t.toLowerCase()]=e;}),c.each(o.members,function(t,e){var i=(e.name||t).toLowerCase();if("headers"===e.location&&"map"===e.type){r[t]={};var o=e.isLocationName?e.name:"",a=new RegExp("^"+o+"(.+)","i");c.each(n.headers,function(e,n){var i=e.match(a);null!==i&&(r[t][i[1]]=n);});}else "header"===e.location?void 0!==s[i]&&(r[t]=s[i]):"statusCode"===e.location&&(r[t]=parseInt(n.statusCode,10));}),t.data=r;}var c=t("../util");e.exports={buildRequest:s,extractError:a,extractData:u};},{"../util":84}],49:[function(t,e,r){function n(t){var e=t.service.api.operations[t.operation],r=t.httpRequest;r.headers["Content-Type"]="application/x-www-form-urlencoded; charset=utf-8",r.params={Version:t.service.api.apiVersion,Action:e.name};var n=new u();n.serialize(t.params,e.input,function(t,e){r.params[t]=e;}),r.body=a.queryParamsToString(r.params);}function i(t){var e,r=t.httpResponse.body.toString();e=r.match("<UnknownOperationException")?{Code:"UnknownOperation",Message:"Unknown operation "+t.request.operation}:new s.XML.Parser().parse(r),e.requestId&&!t.requestId&&(t.requestId=e.requestId),e.Errors&&(e=e.Errors),e.Error&&(e=e.Error),e.Code?t.error=a.error(new Error(),{code:e.Code,message:e.Message}):t.error=a.error(new Error(),{code:t.httpResponse.statusCode,message:null});}function o(t){var e=t.request,r=e.service.api.operations[e.operation],n=r.output||{},i=n;if(i.resultWrapper){var o=c.create({type:"structure"});o.members[i.resultWrapper]=n,o.memberNames=[i.resultWrapper],a.property(n,"name",n.resultWrapper),n=o;}var u=new s.XML.Parser();if(n&&n.members&&!n.members._XAMZRequestId){var l=c.create({type:"string"},{api:{protocol:"query"}},"requestId");n.members._XAMZRequestId=l;}var h=u.parse(t.httpResponse.body.toString(),n);t.requestId=h._XAMZRequestId||h.requestId,h._XAMZRequestId&&delete h._XAMZRequestId,i.resultWrapper&&h[i.resultWrapper]&&(a.update(h,h[i.resultWrapper]),delete h[i.resultWrapper]),t.data=h;}var s=t("../core"),a=t("../util"),u=t("../query/query_param_serializer"),c=t("../model/shape");e.exports={buildRequest:n,extractError:i,extractData:o};},{"../core":24,"../model/shape":46,"../query/query_param_serializer":53,"../util":84}],53:[function(t,e,r){function n(){}function i(t){return t.isQueryName||"ec2"!==t.api.protocol?t.name:t.name[0].toUpperCase()+t.name.substr(1);}function o(t,e,r,n){c.each(r.members,function(r,o){var s=e[r];if(null!==s&&void 0!==s){var a=i(o);a=t?t+"."+a:a,u(a,s,o,n);}});}function s(t,e,r,n){var i=1;c.each(e,function(e,o){var s=r.flattened?".":".entry.",a=s+i+++".",c=a+(r.key.name||"key"),l=a+(r.value.name||"value");u(t+c,e,r.key,n),u(t+l,o,r.value,n);});}function a(t,e,r,n){var o=r.member||{};return 0===e.length?void n.call(this,t,null):void c.arrayEach(e,function(e,s){var a="."+(s+1);if("ec2"===r.api.protocol)a+="";else if(r.flattened){if(o.name){var c=t.split(".");c.pop(),c.push(i(o)),t=c.join(".");}}else a=".member"+a;u(t+a,e,o,n);});}function u(t,e,r,n){null!==e&&void 0!==e&&("structure"===r.type?o(t,e,r,n):"list"===r.type?a(t,e,r,n):"map"===r.type?s(t,e,r,n):n(t,r.toWireFormat(e).toString()));}var c=t("../util");n.prototype.serialize=function(t,e,r){o("",t,e,r);},e.exports=n;},{"../util":84}],46:[function(t,e,r){function n(t,e,r){null!==r&&void 0!==r&&v.property.apply(this,arguments);}function i(t,e){t.constructor.prototype[e]||v.memoizedProperty.apply(this,arguments);}function o(t,e,r){e=e||{},n(this,"shape",t.shape),n(this,"api",e.api,!1),n(this,"type",t.type),n(this,"enum",t["enum"]),n(this,"min",t.min),n(this,"max",t.max),n(this,"pattern",t.pattern),n(this,"location",t.location||this.location||"body"),n(this,"name",this.name||t.xmlName||t.queryName||t.locationName||r),n(this,"isStreaming",t.streaming||this.isStreaming||!1),n(this,"isComposite",t.isComposite||!1),n(this,"isShape",!0,!1),n(this,"isQueryName",t.queryName?!0:!1,!1),n(this,"isLocationName",t.locationName?!0:!1,!1),e.documentation&&(n(this,"documentation",t.documentation),n(this,"documentationUrl",t.documentationUrl)),t.xmlAttribute&&n(this,"isXmlAttribute",t.xmlAttribute||!1),n(this,"defaultValue",null),this.toWireFormat=function(t){return null===t||void 0===t?"":t;},this.toType=function(t){return t;};}function s(t){o.apply(this,arguments),n(this,"isComposite",!0),t.flattened&&n(this,"flattened",t.flattened||!1);}function a(t,e){var r=null,a=!this.isShape;s.apply(this,arguments),a&&(n(this,"defaultValue",function(){return {};}),n(this,"members",{}),n(this,"memberNames",[]),n(this,"required",[]),n(this,"isRequired",function(){return !1;})),t.members&&(n(this,"members",new m(t.members,e,function(t,r){return o.create(r,e,t);})),i(this,"memberNames",function(){return t.xmlOrder||Object.keys(t.members);})),t.required&&(n(this,"required",t.required),n(this,"isRequired",function(e){if(!r){r={};for(var n=0;n<t.required.length;n++){r[t.required[n]]=!0;}}return r[e];},!1,!0)),n(this,"resultWrapper",t.resultWrapper||null),t.payload&&n(this,"payload",t.payload),"string"==typeof t.xmlNamespace?n(this,"xmlNamespaceUri",t.xmlNamespace):"object"==_typeof(t.xmlNamespace)&&(n(this,"xmlNamespacePrefix",t.xmlNamespace.prefix),n(this,"xmlNamespaceUri",t.xmlNamespace.uri));}function u(t,e){var r=this,a=!this.isShape;if(s.apply(this,arguments),a&&n(this,"defaultValue",function(){return [];}),t.member&&i(this,"member",function(){return o.create(t.member,e);}),this.flattened){var u=this.name;i(this,"name",function(){return r.member.name||u;});}}function c(t,e){var r=!this.isShape;s.apply(this,arguments),r&&(n(this,"defaultValue",function(){return {};}),n(this,"key",o.create({type:"string"},e)),n(this,"value",o.create({type:"string"},e))),t.key&&i(this,"key",function(){return o.create(t.key,e);}),t.value&&i(this,"value",function(){return o.create(t.value,e);});}function l(t){var e=this;if(o.apply(this,arguments),"header"===this.location)n(this,"timestampFormat","rfc822");else if(t.timestampFormat)n(this,"timestampFormat",t.timestampFormat);else if(this.api)if(this.api.timestampFormat)n(this,"timestampFormat",this.api.timestampFormat);else switch(this.api.protocol){case "json":case "rest-json":n(this,"timestampFormat","unixTimestamp");break;case "rest-xml":case "query":case "ec2":n(this,"timestampFormat","iso8601");}this.toType=function(t){return null===t||void 0===t?null:"function"==typeof t.toUTCString?t:"string"==typeof t||"number"==typeof t?v.date.parseTimestamp(t):null;},this.toWireFormat=function(t){return v.date.format(t,e.timestampFormat);};}function h(){if(o.apply(this,arguments),this.api)switch(this.api.protocol){case "rest-xml":case "query":case "ec2":this.toType=function(t){return t||"";};}}function p(){o.apply(this,arguments),this.toType=function(t){return null===t||void 0===t?null:parseFloat(t);},this.toWireFormat=this.toType;}function f(){o.apply(this,arguments),this.toType=function(t){return null===t||void 0===t?null:parseInt(t,10);},this.toWireFormat=this.toType;}function d(){o.apply(this,arguments),this.toType=v.base64.decode,this.toWireFormat=v.base64.encode;}function y(){d.apply(this,arguments);}function g(){o.apply(this,arguments),this.toType=function(t){return "boolean"==typeof t?t:null===t||void 0===t?null:"true"===t;};}var m=t("./collection"),v=t("../util");o.normalizedTypes={character:"string","double":"float","long":"integer","short":"integer",biginteger:"integer",bigdecimal:"float",blob:"binary"},o.types={structure:a,list:u,map:c,"boolean":g,timestamp:l,"float":p,integer:f,string:h,base64:y,binary:d},o.resolve=function(t,e){if(t.shape){var r=e.api.shapes[t.shape];if(!r)throw new Error("Cannot find shape reference: "+t.shape);return r;}return null;},o.create=function(t,e,r){if(t.isShape)return t;var n=o.resolve(t,e);if(n){var i=Object.keys(t);if(e.documentation||(i=i.filter(function(t){return !t.match(/documentation/);})),i===["shape"])return n;var s=function s(){n.constructor.call(this,t,e,r);};return s.prototype=n,new s();}t.type||(t.members?t.type="structure":t.member?t.type="list":t.key?t.type="map":t.type="string");var a=t.type;if(o.normalizedTypes[t.type]&&(t.type=o.normalizedTypes[t.type]),o.types[t.type])return new o.types[t.type](t,e,r);throw new Error("Unrecognized shape type: "+a);},o.shapes={StructureShape:a,ListShape:u,MapShape:c,StringShape:h,BooleanShape:g,Base64Shape:y},e.exports=o;},{"../util":84,"./collection":42}],42:[function(t,e,r){function n(t,e,r,n){o(this,n(t),function(){return r(t,e);});}function i(t,e,r,i){i=i||String;var o=this;for(var s in t){t.hasOwnProperty(s)&&n.call(o,s,t[s],r,i);}}var o=t("../util").memoizedProperty;e.exports=i;},{"../util":84}],48:[function(t,e,r){function n(t){var e=t.httpRequest,r=t.service.api,n=r.targetPrefix+"."+r.operations[t.operation].name,i=r.jsonVersion||"1.0",o=r.operations[t.operation].input,s=new a();1===i&&(i="1.0"),e.body=s.build(t.params||{},o),e.headers["Content-Type"]="application/x-amz-json-"+i,e.headers["X-Amz-Target"]=n;}function i(t){var e={},r=t.httpResponse;if(e.code=r.headers["x-amzn-errortype"]||"UnknownError","string"==typeof e.code&&(e.code=e.code.split(":")[0]),r.body.length>0){var n=JSON.parse(r.body.toString());(n.__type||n.code)&&(e.code=(n.__type||n.code).split("#").pop()),"RequestEntityTooLarge"===e.code?e.message="Request body must be less than 1 MB":e.message=n.message||n.Message||null;}else e.statusCode=r.statusCode,e.message=r.statusCode.toString();t.error=s.error(new Error(),e);}function o(t){var e=t.httpResponse.body.toString()||"{}";if(t.request.service.config.convertResponseTypes===!1)t.data=JSON.parse(e);else {var r=t.request.service.api.operations[t.request.operation],n=r.output||{},i=new u();t.data=i.parse(e,n);}}var s=t("../util"),a=t("../json/builder"),u=t("../json/parser");e.exports={buildRequest:n,extractError:i,extractData:o};},{"../json/builder":39,"../json/parser":40,"../util":84}],40:[function(t,e,r){function n(){}function i(t,e){if(!e||void 0===t)return void 0;switch(e.type){case "structure":return o(t,e);case "map":return a(t,e);case "list":return s(t,e);default:return u(t,e);}}function o(t,e){if(null==t)return void 0;var r={},n=e.members;return c.each(n,function(e,n){var o=n.isLocationName?n.name:e;if(t.hasOwnProperty(o)){var s=t[o],a=i(s,n);void 0!==a&&(r[e]=a);}}),r;}function s(t,e){if(null==t)return void 0;var r=[];return c.arrayEach(t,function(t){var n=i(t,e.member);void 0===n?r.push(null):r.push(n);}),r;}function a(t,e){if(null==t)return void 0;var r={};return c.each(t,function(t,n){var o=i(n,e.value);void 0===o?r[t]=null:r[t]=o;}),r;}function u(t,e){return e.toType(t);}var c=t("../util");n.prototype.parse=function(t,e){return i(JSON.parse(t),e);},e.exports=n;},{"../util":84}],39:[function(t,e,r){function n(){}function i(t,e){if(!e||void 0===t||null===t)return void 0;switch(e.type){case "structure":return o(t,e);case "map":return a(t,e);case "list":return s(t,e);default:return u(t,e);}}function o(t,e){var r={};return c.each(t,function(t,n){var o=e.members[t];if(o){if("body"!==o.location)return;var s=o.isLocationName?o.name:t,a=i(n,o);void 0!==a&&(r[s]=a);}}),r;}function s(t,e){var r=[];return c.arrayEach(t,function(t){var n=i(t,e.member);void 0!==n&&r.push(n);}),r;}function a(t,e){var r={};return c.each(t,function(t,n){var o=i(n,e.value);void 0!==o&&(r[t]=o);}),r;}function u(t,e){return e.toWireFormat(t);}var c=t("../util");n.prototype.build=function(t,e){return JSON.stringify(i(t,e));},e.exports=n;},{"../util":84}],84:[function(t,e,r){(function(r){var n,i=t("crypto"),o=t("buffer").Buffer,s={engine:function engine(){return s.isBrowser()&&"undefined"!=typeof navigator?navigator.userAgent:r.platform+"/"+r.version;},userAgent:function userAgent(){var e=s.isBrowser()?"js":"nodejs",r="aws-sdk-"+e+"/"+t("./core").VERSION;return "nodejs"===e&&(r+=" "+s.engine()),r;},isBrowser:function isBrowser(){return r&&r.browser;},isNode:function isNode(){return !s.isBrowser();},nodeRequire:function nodeRequire(e){return s.isNode()?t(e):void 0;},multiRequire:function multiRequire(e,r){return t(s.isNode()?e:r);},uriEscape:function uriEscape(t){var e=encodeURIComponent(t);return e=e.replace(/[^A-Za-z0-9_.~\-%]+/g,escape),e=e.replace(/[*]/g,function(t){return "%"+t.charCodeAt(0).toString(16).toUpperCase();});},uriEscapePath:function uriEscapePath(t){var e=[];return s.arrayEach(t.split("/"),function(t){e.push(s.uriEscape(t));}),e.join("/");},urlParse:function urlParse(e){return t("url").parse(e);},urlFormat:function urlFormat(e){return t("url").format(e);},queryStringParse:function queryStringParse(e){return t("querystring").parse(e);},queryParamsToString:function queryParamsToString(t){var e=[],r=s.uriEscape,n=Object.keys(t).sort();return s.arrayEach(n,function(n){var i=t[n],o=r(n),a=o+"=";if(Array.isArray(i)){var u=[];s.arrayEach(i,function(t){u.push(r(t));}),a=o+"="+u.sort().join("&"+o+"=");}else void 0!==i&&null!==i&&(a=o+"="+r(i));e.push(a);}),e.join("&");},readFileSync:function readFileSync(t){return "undefined"!=typeof window?null:s.nodeRequire("fs").readFileSync(t,"utf-8");},base64:{encode:function encode(t){return new o(t).toString("base64");},decode:function decode(t){return new o(t,"base64");}},Buffer:o,buffer:{toStream:function toStream(t){s.Buffer.isBuffer(t)||(t=new s.Buffer(t));var e=new (s.nodeRequire("stream").Readable)(),r=0;return e._read=function(n){if(r>=t.length)return e.push(null);var i=r+n;i>t.length&&(i=t.length),e.push(t.slice(r,i)),r=i;},e;},concat:function concat(t){var e,r=0,n=0,i=null;for(e=0;e<t.length;e++){r+=t[e].length;}for(i=new o(r),e=0;e<t.length;e++){t[e].copy(i,n),n+=t[e].length;}return i;}},string:{byteLength:function byteLength(t){if(null===t||void 0===t)return 0;if("string"==typeof t&&(t=new o(t)),"number"==typeof t.byteLength)return t.byteLength;if("number"==typeof t.length)return t.length;if("number"==typeof t.size)return t.size;if("string"==typeof t.path)return s.nodeRequire("fs").lstatSync(t.path).size;throw s.error(new Error("Cannot determine length of "+t),{object:t});},upperFirst:function upperFirst(t){return t[0].toUpperCase()+t.substr(1);},lowerFirst:function lowerFirst(t){return t[0].toLowerCase()+t.substr(1);}},ini:{parse:function parse(t){var e,r={};return s.arrayEach(t.split(/\r?\n/),function(t){t=t.split(/(^|\s);/)[0];var n=t.match(/^\s*\[([^\[\]]+)\]\s*$/);if(n)e=n[1];else if(e){var i=t.match(/^\s*(.+?)\s*=\s*(.+?)\s*$/);i&&(r[e]=r[e]||{},r[e][i[1]]=i[2]);}}),r;}},fn:{noop:function noop(){},makeAsync:function makeAsync(t,e){return e&&e<=t.length?t:function(){var e=Array.prototype.slice.call(arguments,0),r=e.pop(),n=t.apply(null,e);r(n);};}},jamespath:{query:function query(t,e){if(!e)return [];var r=[],n=t.split(/\s+\|\|\s+/);return s.arrayEach.call(this,n,function(t){var n=[e],i=t.split(".");return s.arrayEach.call(this,i,function(t){var e=t.match("^(.+?)(?:\\[(-?\\d+|\\*|)\\])?$"),r=[];return s.arrayEach.call(this,n,function(t){"*"===e[1]?s.arrayEach.call(this,t,function(t){r.push(t);}):t.hasOwnProperty(e[1])&&r.push(t[e[1]]);}),n=r,void 0!==e[2]&&(r=[],s.arrayEach.call(this,n,function(t){if(Array.isArray(t))if("*"===e[2]||""===e[2])r=r.concat(t);else {var n=parseInt(e[2],10);0>n&&(n=t.length+n),r.push(t[n]);}}),n=r),0===n.length?s.abort:void 0;}),n.length>0?(r=n,s.abort):void 0;}),r;},find:function find(t,e){return s.jamespath.query(t,e)[0];}},date:{getDate:function getDate(){return n||(n=t("./core")),n.config.systemClockOffset?new Date(new Date().getTime()+n.config.systemClockOffset):new Date();},iso8601:function iso8601(t){return void 0===t&&(t=s.date.getDate()),t.toISOString().replace(/\.\d{3}Z$/,"Z");},rfc822:function rfc822(t){return void 0===t&&(t=s.date.getDate()),t.toUTCString();},unixTimestamp:function unixTimestamp(t){return void 0===t&&(t=s.date.getDate()),t.getTime()/1e3;},from:function from(t){return "number"==typeof t?new Date(1e3*t):new Date(t);},format:function format(t,e){return e||(e="iso8601"),s.date[e](s.date.from(t));},parseTimestamp:function parseTimestamp(t){if("number"==typeof t)return new Date(1e3*t);if(t.match(/^\d+$/))return new Date(1e3*t);if(t.match(/^\d{4}/))return new Date(t);if(t.match(/^\w{3},/))return new Date(t);throw s.error(new Error("unhandled timestamp format: "+t),{code:"TimestampParserError"});}},crypto:{crc32Table:[0,1996959894,3993919788,2567524794,124634137,1886057615,3915621685,2657392035,249268274,2044508324,3772115230,2547177864,162941995,2125561021,3887607047,2428444049,498536548,1789927666,4089016648,2227061214,450548861,1843258603,4107580753,2211677639,325883990,1684777152,4251122042,2321926636,335633487,1661365465,4195302755,2366115317,997073096,1281953886,3579855332,2724688242,1006888145,1258607687,3524101629,2768942443,901097722,1119000684,3686517206,2898065728,853044451,1172266101,3705015759,2882616665,651767980,1373503546,3369554304,3218104598,565507253,1454621731,3485111705,3099436303,671266974,1594198024,3322730930,2970347812,795835527,1483230225,3244367275,3060149565,1994146192,31158534,2563907772,4023717930,1907459465,112637215,2680153253,3904427059,2013776290,251722036,2517215374,3775830040,2137656763,141376813,2439277719,3865271297,1802195444,476864866,2238001368,4066508878,1812370925,453092731,2181625025,4111451223,1706088902,314042704,2344532202,4240017532,1658658271,366619977,2362670323,4224994405,1303535960,984961486,2747007092,3569037538,1256170817,1037604311,2765210733,3554079995,1131014506,879679996,2909243462,3663771856,1141124467,855842277,2852801631,3708648649,1342533948,654459306,3188396048,3373015174,1466479909,544179635,3110523913,3462522015,1591671054,702138776,2966460450,3352799412,1504918807,783551873,3082640443,3233442989,3988292384,2596254646,62317068,1957810842,3939845945,2647816111,81470997,1943803523,3814918930,2489596804,225274430,2053790376,3826175755,2466906013,167816743,2097651377,4027552580,2265490386,503444072,1762050814,4150417245,2154129355,426522225,1852507879,4275313526,2312317920,282753626,1742555852,4189708143,2394877945,397917763,1622183637,3604390888,2714866558,953729732,1340076626,3518719985,2797360999,1068828381,1219638859,3624741850,2936675148,906185462,1090812512,3747672003,2825379669,829329135,1181335161,3412177804,3160834842,628085408,1382605366,3423369109,3138078467,570562233,1426400815,3317316542,2998733608,733239954,1555261956,3268935591,3050360625,752459403,1541320221,2607071920,3965973030,1969922972,40735498,2617837225,3943577151,1913087877,83908371,2512341634,3803740692,2075208622,213261112,2463272603,3855990285,2094854071,198958881,2262029012,4057260610,1759359992,534414190,2176718541,4139329115,1873836001,414664567,2282248934,4279200368,1711684554,285281116,2405801727,4167216745,1634467795,376229701,2685067896,3608007406,1308918612,956543938,2808555105,3495958263,1231636301,1047427035,2932959818,3654703836,1088359270,936918e3,2847714899,3736837829,1202900863,817233897,3183342108,3401237130,1404277552,615818150,3134207493,3453421203,1423857449,601450431,3009837614,3294710456,1567103746,711928724,3020668471,3272380065,1510334235,755167117],crc32:function crc32(t){var e=s.crypto.crc32Table,r=-1;"string"==typeof t&&(t=new o(t));for(var n=0;n<t.length;n++){var i=t.readUInt8(n);r=r>>>8^e[255&(r^i)];}return (-1^r)>>>0;},hmac:function hmac(t,e,r,n){return r||(r="binary"),"buffer"===r&&(r=void 0),n||(n="sha256"),"string"==typeof e&&(e=new o(e)),i.createHmac(n,t).update(e).digest(r);},md5:function md5(t,e,r){return s.crypto.hash("md5",t,e,r);},sha256:function sha256(t,e,r){return s.crypto.hash("sha256",t,e,r);},hash:function hash(t,e,r,n){var i=s.crypto.createHash(t);r||(r="binary"),"buffer"===r&&(r=void 0),"string"==typeof e&&(e=new o(e));var a=s.arraySliceFn(e),u=o.isBuffer(e);if(s.isBrowser()&&"undefined"!=typeof ArrayBuffer&&e&&e.buffer instanceof ArrayBuffer&&(u=!0),n&&"object"==(typeof e==="undefined"?"undefined":_typeof(e))&&"function"==typeof e.on&&!u)e.on("data",function(t){i.update(t);}),e.on("error",function(t){n(t);}),e.on("end",function(){n(null,i.digest(r));});else {if(!n||!a||u||"undefined"==typeof FileReader){s.isBrowser()&&"object"==(typeof e==="undefined"?"undefined":_typeof(e))&&!u&&(e=new o(new Uint8Array(e)));var c=i.update(e).digest(r);return n&&n(null,c),c;}var l=0,h=524288,p=new FileReader();p.onerror=function(){n(new Error("Failed to read data."));},p.onload=function(){var t=new o(new Uint8Array(p.result));i.update(t),l+=t.length,p._continueReading();},p._continueReading=function(){if(l>=e.size)return void n(null,i.digest(r));var t=l+h;t>e.size&&(t=e.size),p.readAsArrayBuffer(a.call(e,l,t));},p._continueReading();}},toHex:function toHex(t){for(var e=[],r=0;r<t.length;r++){e.push(("0"+t.charCodeAt(r).toString(16)).substr(-2,2));}return e.join("");},createHash:function createHash(t){return i.createHash(t);}},abort:{},each:function each(t,e){for(var r in t){if(Object.prototype.hasOwnProperty.call(t,r)){var n=e.call(this,r,t[r]);if(n===s.abort)break;}}},arrayEach:function arrayEach(t,e){for(var r in t){if(t.hasOwnProperty(r)){var n=e.call(this,t[r],parseInt(r,10));if(n===s.abort)break;}}},update:function update(t,e){return s.each(e,function(e,r){t[e]=r;}),t;},merge:function merge(t,e){return s.update(s.copy(t),e);},copy:function copy(t){if(null===t||void 0===t)return t;var e={};for(var r in t){e[r]=t[r];}return e;},isEmpty:function isEmpty(t){for(var e in t){if(t.hasOwnProperty(e))return !1;}return !0;},arraySliceFn:function arraySliceFn(t){var e=t.slice||t.webkitSlice||t.mozSlice;return "function"==typeof e?e:null;},isType:function isType(t,e){return "function"==typeof e&&(e=s.typeName(e)),Object.prototype.toString.call(t)==="[object "+e+"]";},typeName:function typeName(t){if(t.hasOwnProperty("name"))return t.name;var e=t.toString(),r=e.match(/^\s*function (.+)\(/);return r?r[1]:e;},error:function error(t,e){var r=null;return "string"==typeof t.message&&""!==t.message&&("string"==typeof e||e&&e.message)&&(r=s.copy(t),r.message=t.message),t.message=t.message||null,"string"==typeof e?t.message=e:"object"==(typeof e==="undefined"?"undefined":_typeof(e))&&null!==e&&(s.update(t,e),e.message&&(t.message=e.message),(e.code||e.name)&&(t.code=e.code||e.name),e.stack&&(t.stack=e.stack)),"function"==typeof Object.defineProperty&&(Object.defineProperty(t,"name",{writable:!0,enumerable:!1}),Object.defineProperty(t,"message",{enumerable:!0})),t.name=e&&e.name||t.name||t.code||"Error",t.time=new Date(),r&&(t.originalError=r),t;},inherit:function inherit(t,e){var r=null;if(void 0===e)e=t,t=Object,r={};else {var n=function n(){};n.prototype=t.prototype,r=new n();}return e.constructor===Object&&(e.constructor=function(){return t!==Object?t.apply(this,arguments):void 0;}),e.constructor.prototype=r,s.update(e.constructor.prototype,e),e.constructor.__super__=t,e.constructor;},mixin:function mixin(){for(var t=arguments[0],e=1;e<arguments.length;e++){for(var r in arguments[e].prototype){var n=arguments[e].prototype[r];"constructor"!==r&&(t.prototype[r]=n);}}return t;},hideProperties:function hideProperties(t,e){"function"==typeof Object.defineProperty&&s.arrayEach(e,function(e){Object.defineProperty(t,e,{enumerable:!1,writable:!0,configurable:!0});});},property:function property(t,e,r,n,i){var o={configurable:!0,enumerable:void 0!==n?n:!0};"function"!=typeof r||i?(o.value=r,o.writable=!0):o.get=r,Object.defineProperty(t,e,o);},memoizedProperty:function memoizedProperty(t,e,r,n){var i=null;s.property(t,e,function(){return null===i&&(i=r()),i;},n);},hoistPayloadMember:function hoistPayloadMember(t){var e=t.request,r=e.operation,n=e.service.api.operations[r].output;if(n.payload){var i=n.members[n.payload],o=t.data[n.payload];"structure"===i.type&&s.each(o,function(e,r){s.property(t.data,e,r,!1);});}},computeSha256:function computeSha256(t,e){if(s.isNode()){var r=s.nodeRequire("stream").Stream,n=s.nodeRequire("fs");if(t instanceof r){if("string"!=typeof t.path)return e(new Error("Non-file stream objects are not supported with SigV4"));t=n.createReadStream(t.path);}}s.crypto.sha256(t,"hex",function(t,r){t?e(t):e(null,r);});},isClockSkewed:function isClockSkewed(t){return t?(s.property(n.config,"isClockSkewed",Math.abs(new Date().getTime()-t)>=3e5,!1),n.config.isClockSkewed):void 0;},applyClockOffset:function applyClockOffset(t){t&&(n.config.systemClockOffset=t-new Date().getTime());},extractRequestId:function extractRequestId(t){var e=t.httpResponse.headers["x-amz-request-id"]||t.httpResponse.headers["x-amzn-requestid"];!e&&t.data&&t.data.ResponseMetadata&&(e=t.data.ResponseMetadata.RequestId),e&&(t.requestId=e),t.error&&(t.error.requestId=e);}};e.exports=s;}).call(this,t("_process"));},{"./core":24,_process:13,buffer:1,crypto:6,querystring:17,url:18}],30:[function(t,e,r){var n=t("../core");n.WebIdentityCredentials=n.util.inherit(n.Credentials,{constructor:function constructor(t){n.Credentials.call(this),this.expired=!0,this.params=t,this.params.RoleSessionName=this.params.RoleSessionName||"web-identity",this.data=null;},refresh:function refresh(t){var e=this;e.createClients(),t||(t=function t(_t2){if(_t2)throw _t2;}),e.service.assumeRoleWithWebIdentity(function(r,n){e.data=null,r||(e.data=n,e.service.credentialsFrom(n,e)),t(r);});},createClients:function createClients(){this.service=this.service||new n.STS({params:this.params});}});},{"../core":24}],29:[function(t,e,r){var n=t("../core");n.TemporaryCredentials=n.util.inherit(n.Credentials,{constructor:function constructor(t){n.Credentials.call(this),this.loadMasterCredentials(),this.expired=!0,this.params=t||{},this.params.RoleArn&&(this.params.RoleSessionName=this.params.RoleSessionName||"temporary-credentials");},refresh:function refresh(t){var e=this;e.createClients(),t||(t=function t(_t3){if(_t3)throw _t3;}),e.service.config.credentials=e.masterCredentials;var r=e.params.RoleArn?e.service.assumeRole:e.service.getSessionToken;r.call(e.service,function(r,n){r||e.service.credentialsFrom(n,e),t(r);});},loadMasterCredentials:function loadMasterCredentials(){for(this.masterCredentials=n.config.credentials;this.masterCredentials.masterCredentials;){this.masterCredentials=this.masterCredentials.masterCredentials;}},createClients:function createClients(){this.service=this.service||new n.STS({params:this.params});}});},{"../core":24}],28:[function(t,e,r){var n=t("../core");n.SAMLCredentials=n.util.inherit(n.Credentials,{constructor:function constructor(t){n.Credentials.call(this),this.expired=!0,this.params=t;},refresh:function refresh(t){var e=this;e.createClients(),t||(t=function t(_t4){if(_t4)throw _t4;}),e.service.assumeRoleWithSAML(function(r,n){r||e.service.credentialsFrom(n,e),t(r);});},createClients:function createClients(){this.service=this.service||new n.STS({params:this.params});}});},{"../core":24}],26:[function(t,e,r){var n=t("../core");n.CognitoIdentityCredentials=n.util.inherit(n.Credentials,{localStorageKey:{id:"aws.cognito.identity-id.",providers:"aws.cognito.identity-providers."},constructor:function constructor(t){n.Credentials.call(this),this.expired=!0,this.params=t,this.data=null,this.identityId=null,this.loadCachedId();},refresh:function refresh(t){var e=this;e.createClients(),e.data=null,e.identityId=null,e.getId(function(r){r?(e.clearCachedId(),t(r)):e.params.RoleArn?e.getCredentialsFromSTS(t):e.getCredentialsForIdentity(t);});},clearCachedId:function clearCachedId(){this.identityId=null,delete this.params.IdentityId;var t=this.params.IdentityPoolId,e=this.params.LoginId||"";delete this.storage[this.localStorageKey.id+t+e],delete this.storage[this.localStorageKey.providers+t+e];},getId:function getId(t){var e=this;return "string"==typeof e.params.IdentityId?t(null,e.params.IdentityId):void e.cognito.getId(function(r,n){!r&&n.IdentityId?(e.params.IdentityId=n.IdentityId,t(null,n.IdentityId)):t(r);});},loadCredentials:function loadCredentials(t,e){t&&e&&(e.expired=!1,e.accessKeyId=t.Credentials.AccessKeyId,e.secretAccessKey=t.Credentials.SecretKey,e.sessionToken=t.Credentials.SessionToken,e.expireTime=t.Credentials.Expiration);},getCredentialsForIdentity:function getCredentialsForIdentity(t){var e=this;e.cognito.getCredentialsForIdentity(function(r,n){r?e.clearCachedId():(e.cacheId(n),e.data=n,e.loadCredentials(e.data,e)),t(r);});},getCredentialsFromSTS:function getCredentialsFromSTS(t){var e=this;e.cognito.getOpenIdToken(function(r,n){r?(e.clearCachedId(),t(r)):(e.cacheId(n),e.params.WebIdentityToken=n.Token,e.webIdentityCredentials.refresh(function(r){r?e.clearCachedId():(e.data=e.webIdentityCredentials.data,e.sts.credentialsFrom(e.data,e)),t(r);}));});},loadCachedId:function loadCachedId(){var t=this;if(n.util.isBrowser()&&!t.params.IdentityId){var e=t.getStorage("id");if(e&&t.params.Logins){var r=Object.keys(t.params.Logins),i=(t.getStorage("providers")||"").split(","),o=i.filter(function(t){return -1!==r.indexOf(t);});0!==o.length&&(t.params.IdentityId=e);}else e&&(t.params.IdentityId=e);}},createClients:function createClients(){this.webIdentityCredentials=this.webIdentityCredentials||new n.WebIdentityCredentials(this.params),this.cognito=this.cognito||new n.CognitoIdentity({params:this.params}),this.sts=this.sts||new n.STS();},cacheId:function cacheId(t){this.identityId=t.IdentityId,this.params.IdentityId=this.identityId,n.util.isBrowser()&&(this.setStorage("id",t.IdentityId),this.params.Logins&&this.setStorage("providers",Object.keys(this.params.Logins).join(",")));},getStorage:function getStorage(t){return this.storage[this.localStorageKey[t]+this.params.IdentityPoolId+(this.params.LoginId||"")];},setStorage:function setStorage(t,e){try{this.storage[this.localStorageKey[t]+this.params.IdentityPoolId+(this.params.LoginId||"")]=e;}catch(r){}},storage:function(){try{return n.util.isBrowser()&&null!==window.localStorage&&"object"==_typeof(window.localStorage)?window.localStorage:{};}catch(t){return {};}}()});},{"../core":24}],23:[function(t,e,r){var n=t("./core");t("./credentials"),t("./credentials/credential_provider_chain"),n.Config=n.util.inherit({constructor:function constructor(t){void 0===t&&(t={}),t=this.extractCredentials(t),n.util.each.call(this,this.keys,function(e,r){this.set(e,t[e],r);});},getCredentials:function getCredentials(t){function e(e){t(e,e?null:s.credentials);}function r(t,e){return new n.util.error(e||new Error(),{code:"CredentialsError",message:t});}function i(){s.credentials.get(function(t){if(t){var n="Could not load credentials from "+s.credentials.constructor.name;t=r(n,t);}e(t);});}function o(){var t=null;s.credentials.accessKeyId&&s.credentials.secretAccessKey||(t=r("Missing credentials")),e(t);}var s=this;s.credentials?"function"==typeof s.credentials.get?i():o():s.credentialProvider?s.credentialProvider.resolve(function(t,n){t&&(t=r("Could not load credentials from any providers",t)),s.credentials=n,e(t);}):e(r("No credentials to load"));},update:function update(t,e){e=e||!1,t=this.extractCredentials(t),n.util.each.call(this,t,function(t,r){(e||this.keys.hasOwnProperty(t)||n.Service.hasService(t))&&this.set(t,r);});},loadFromPath:function loadFromPath(t){this.clear();var e=JSON.parse(n.util.readFileSync(t)),r=new n.FileSystemCredentials(t),i=new n.CredentialProviderChain();return i.providers.unshift(r),i.resolve(function(t,r){if(t)throw t;e.credentials=r;}),this.constructor(e),this;},clear:function clear(){n.util.each.call(this,this.keys,function(t){delete this[t];}),this.set("credentials",void 0),this.set("credentialProvider",void 0);},set:function set(t,e,r){void 0===e?(void 0===r&&(r=this.keys[t]),"function"==typeof r?this[t]=r.call(this):this[t]=r):"httpOptions"===t&&this[t]?this[t]=n.util.merge(this[t],e):this[t]=e;},keys:{credentials:null,credentialProvider:null,region:null,logger:null,apiVersions:{},apiVersion:null,endpoint:void 0,httpOptions:{timeout:12e4},maxRetries:void 0,maxRedirects:10,paramValidation:!0,sslEnabled:!0,s3ForcePathStyle:!1,s3BucketEndpoint:!1,computeChecksums:!0,convertResponseTypes:!0,correctClockSkew:!1,customUserAgent:null,dynamoDbCrc32:!0,systemClockOffset:0,signatureVersion:null,signatureCache:!0,retryDelayOptions:{base:100}},extractCredentials:function extractCredentials(t){return t.accessKeyId&&t.secretAccessKey&&(t=n.util.copy(t),t.credentials=new n.Credentials(t)),t;}}),n.config=new n.Config();},{"./core":24,"./credentials":25,"./credentials/credential_provider_chain":27}],27:[function(t,e,r){var n=t("../core");n.CredentialProviderChain=n.util.inherit(n.Credentials,{constructor:function constructor(t){t?this.providers=t:this.providers=n.CredentialProviderChain.defaultProviders.slice(0);},resolve:function resolve(t){function e(i,o){if(!i&&o||r===n.length)return void t(i,o);var s=n[r++];o="function"==typeof s?s.call():s,o.get?o.get(function(t){e(t,t?null:o);}):e(null,o);}if(0===this.providers.length)return t(new Error("No providers")),this;var r=0,n=this.providers.slice(0);return e(),this;}}),n.CredentialProviderChain.defaultProviders=[];},{"../core":24}],25:[function(t,e,r){var n=t("./core");n.Credentials=n.util.inherit({constructor:function constructor(){if(n.util.hideProperties(this,["secretAccessKey"]),this.expired=!1,this.expireTime=null,1===arguments.length&&"object"==_typeof(arguments[0])){var t=arguments[0].credentials||arguments[0];this.accessKeyId=t.accessKeyId,this.secretAccessKey=t.secretAccessKey,this.sessionToken=t.sessionToken;}else this.accessKeyId=arguments[0],this.secretAccessKey=arguments[1],this.sessionToken=arguments[2];},expiryWindow:15,needsRefresh:function needsRefresh(){var t=n.util.date.getDate().getTime(),e=new Date(t+1e3*this.expiryWindow);return this.expireTime&&e>this.expireTime?!0:this.expired||!this.accessKeyId||!this.secretAccessKey;},get:function get(t){var e=this;this.needsRefresh()?this.refresh(function(r){r||(e.expired=!1),t&&t(r);}):t&&t();},refresh:function refresh(t){this.expired=!1,t();}});},{"./core":24}],20:[function(t,e,r){(function(e,n){function i(t,e){var n={seen:[],stylize:s};return arguments.length>=3&&(n.depth=arguments[2]),arguments.length>=4&&(n.colors=arguments[3]),y(e)?n.showHidden=e:e&&r._extend(n,e),E(n.showHidden)&&(n.showHidden=!1),E(n.depth)&&(n.depth=2),E(n.colors)&&(n.colors=!1),E(n.customInspect)&&(n.customInspect=!0),n.colors&&(n.stylize=o),u(n,t,n.depth);}function o(t,e){var r=i.styles[e];return r?"["+i.colors[r][0]+"m"+t+"["+i.colors[r][1]+"m":t;}function s(t,e){return t;}function a(t){var e={};return t.forEach(function(t,r){e[t]=!0;}),e;}function u(t,e,n){if(t.customInspect&&e&&C(e.inspect)&&e.inspect!==r.inspect&&(!e.constructor||e.constructor.prototype!==e)){var i=e.inspect(n,t);return b(i)||(i=u(t,i,n)),i;}var o=c(t,e);if(o)return o;var s=Object.keys(e),y=a(s);if(t.showHidden&&(s=Object.getOwnPropertyNames(e)),R(e)&&(s.indexOf("message")>=0||s.indexOf("description")>=0))return l(e);if(0===s.length){if(C(e)){var g=e.name?": "+e.name:"";return t.stylize("[Function"+g+"]","special");}if(x(e))return t.stylize(RegExp.prototype.toString.call(e),"regexp");if(A(e))return t.stylize(Date.prototype.toString.call(e),"date");if(R(e))return l(e);}var m="",v=!1,w=["{","}"];if(d(e)&&(v=!0,w=["[","]"]),C(e)){var E=e.name?": "+e.name:"";m=" [Function"+E+"]";}if(x(e)&&(m=" "+RegExp.prototype.toString.call(e)),A(e)&&(m=" "+Date.prototype.toUTCString.call(e)),R(e)&&(m=" "+l(e)),0===s.length&&(!v||0==e.length))return w[0]+m+w[1];if(0>n)return x(e)?t.stylize(RegExp.prototype.toString.call(e),"regexp"):t.stylize("[Object]","special");t.seen.push(e);var S;return S=v?h(t,e,n,y,s):s.map(function(r){return p(t,e,n,y,r,v);}),t.seen.pop(),f(S,m,w);}function c(t,e){if(E(e))return t.stylize("undefined","undefined");if(b(e)){var r="'"+JSON.stringify(e).replace(/^"|"$/g,"").replace(/'/g,"\\'").replace(/\\"/g,'"')+"'";return t.stylize(r,"string");}return v(e)?t.stylize(""+e,"number"):y(e)?t.stylize(""+e,"boolean"):g(e)?t.stylize("null","null"):void 0;}function l(t){return "["+Error.prototype.toString.call(t)+"]";}function h(t,e,r,n,i){for(var o=[],s=0,a=e.length;a>s;++s){j(e,String(s))?o.push(p(t,e,r,n,String(s),!0)):o.push("");}return i.forEach(function(i){i.match(/^\d+$/)||o.push(p(t,e,r,n,i,!0));}),o;}function p(t,e,r,n,i,o){var s,a,c;if(c=Object.getOwnPropertyDescriptor(e,i)||{value:e[i]},c.get?a=c.set?t.stylize("[Getter/Setter]","special"):t.stylize("[Getter]","special"):c.set&&(a=t.stylize("[Setter]","special")),j(n,i)||(s="["+i+"]"),a||(t.seen.indexOf(c.value)<0?(a=g(r)?u(t,c.value,null):u(t,c.value,r-1),a.indexOf("\n")>-1&&(a=o?a.split("\n").map(function(t){return "  "+t;}).join("\n").substr(2):"\n"+a.split("\n").map(function(t){return "   "+t;}).join("\n"))):a=t.stylize("[Circular]","special")),E(s)){if(o&&i.match(/^\d+$/))return a;s=JSON.stringify(""+i),s.match(/^"([a-zA-Z_][a-zA-Z_0-9]*)"$/)?(s=s.substr(1,s.length-2),s=t.stylize(s,"name")):(s=s.replace(/'/g,"\\'").replace(/\\"/g,'"').replace(/(^"|"$)/g,"'"),s=t.stylize(s,"string"));}return s+": "+a;}function f(t,e,r){var n=0,i=t.reduce(function(t,e){return n++,e.indexOf("\n")>=0&&n++,t+e.replace(/\u001b\[\d\d?m/g,"").length+1;},0);return i>60?r[0]+(""===e?"":e+"\n ")+" "+t.join(",\n  ")+" "+r[1]:r[0]+e+" "+t.join(", ")+" "+r[1];}function d(t){return Array.isArray(t);}function y(t){return "boolean"==typeof t;}function g(t){return null===t;}function m(t){return null==t;}function v(t){return "number"==typeof t;}function b(t){return "string"==typeof t;}function w(t){return "symbol"==(typeof t==="undefined"?"undefined":_typeof(t));}function E(t){return void 0===t;}function x(t){return S(t)&&"[object RegExp]"===T(t);}function S(t){return "object"==(typeof t==="undefined"?"undefined":_typeof(t))&&null!==t;}function A(t){return S(t)&&"[object Date]"===T(t);}function R(t){return S(t)&&("[object Error]"===T(t)||t instanceof Error);}function C(t){return "function"==typeof t;}function I(t){return null===t||"boolean"==typeof t||"number"==typeof t||"string"==typeof t||"symbol"==(typeof t==="undefined"?"undefined":_typeof(t))||"undefined"==typeof t;}function T(t){return Object.prototype.toString.call(t);}function L(t){return 10>t?"0"+t.toString(10):t.toString(10);}function _(){var t=new Date(),e=[L(t.getHours()),L(t.getMinutes()),L(t.getSeconds())].join(":");return [t.getDate(),P[t.getMonth()],e].join(" ");}function j(t,e){return Object.prototype.hasOwnProperty.call(t,e);}var q=/%[sdj%]/g;r.format=function(t){if(!b(t)){for(var e=[],r=0;r<arguments.length;r++){e.push(i(arguments[r]));}return e.join(" ");}for(var r=1,n=arguments,o=n.length,s=String(t).replace(q,function(t){if("%%"===t)return "%";if(r>=o)return t;switch(t){case "%s":return String(n[r++]);case "%d":return Number(n[r++]);case "%j":try{return JSON.stringify(n[r++]);}catch(e){return "[Circular]";}default:return t;}}),a=n[r];o>r;a=n[++r]){s+=g(a)||!S(a)?" "+a:" "+i(a);}return s;},r.deprecate=function(t,i){function o(){if(!s){if(e.throwDeprecation)throw new Error(i);e.traceDeprecation?console.trace(i):console.error(i),s=!0;}return t.apply(this,arguments);}if(E(n.process))return function(){return r.deprecate(t,i).apply(this,arguments);};if(e.noDeprecation===!0)return t;var s=!1;return o;};var D,O={};r.debuglog=function(t){if(E(D)&&(D=e.env.NODE_DEBUG||""),t=t.toUpperCase(),!O[t])if(new RegExp("\\b"+t+"\\b","i").test(D)){var n=e.pid;O[t]=function(){var e=r.format.apply(r,arguments);console.error("%s %d: %s",t,n,e);};}else O[t]=function(){};return O[t];},r.inspect=i,i.colors={bold:[1,22],italic:[3,23],underline:[4,24],inverse:[7,27],white:[37,39],grey:[90,39],black:[30,39],blue:[34,39],cyan:[36,39],green:[32,39],magenta:[35,39],red:[31,39],yellow:[33,39]},i.styles={special:"cyan",number:"yellow","boolean":"yellow",undefined:"grey","null":"bold",string:"green",date:"magenta",regexp:"red"},r.isArray=d,r.isBoolean=y,r.isNull=g,r.isNullOrUndefined=m,r.isNumber=v,r.isString=b,r.isSymbol=w,r.isUndefined=E,r.isRegExp=x,r.isObject=S,r.isDate=A,r.isError=R,r.isFunction=C,r.isPrimitive=I,r.isBuffer=t("./support/isBuffer");var P=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];r.log=function(){console.log("%s - %s",_(),r.format.apply(r,arguments));},r.inherits=t("inherits"),r._extend=function(t,e){if(!e||!S(e))return t;for(var r=Object.keys(e),n=r.length;n--;){t[r[n]]=e[r[n]];}return t;};}).call(this,t("_process"),"undefined"!=typeof global?global:"undefined"!=typeof self?self:"undefined"!=typeof window?window:{});},{"./support/isBuffer":19,_process:13,inherits:12}],19:[function(t,e,r){e.exports=function(t){return t&&"object"==(typeof t==="undefined"?"undefined":_typeof(t))&&"function"==typeof t.copy&&"function"==typeof t.fill&&"function"==typeof t.readUInt8;};},{}],18:[function(t,e,r){function n(){this.protocol=null,this.slashes=null,this.auth=null,this.host=null,this.port=null,this.hostname=null,this.hash=null,this.search=null,this.query=null,this.pathname=null,this.path=null,this.href=null;}function i(t,e,r){if(t&&c(t)&&t instanceof n)return t;var i=new n();return i.parse(t,e,r),i;}function o(t){return u(t)&&(t=i(t)),t instanceof n?t.format():n.prototype.format.call(t);}function s(t,e){return i(t,!1,!0).resolve(e);}function a(t,e){return t?i(t,!1,!0).resolveObject(e):e;}function u(t){return "string"==typeof t;}function c(t){return "object"==(typeof t==="undefined"?"undefined":_typeof(t))&&null!==t;}function l(t){return null===t;}function h(t){return null==t;}var p=t("punycode");r.parse=i,r.resolve=s,r.resolveObject=a,r.format=o,r.Url=n;var f=/^([a-z0-9.+-]+:)/i,d=/:[0-9]*$/,y=["<",">",'"',"`"," ","\r","\n","	"],g=["{","}","|","\\","^","`"].concat(y),m=["'"].concat(g),v=["%","/","?",";","#"].concat(m),b=["/","?","#"],w=255,E=/^[a-z0-9A-Z_-]{0,63}$/,x=/^([a-z0-9A-Z_-]{0,63})(.*)$/,S={javascript:!0,"javascript:":!0},A={javascript:!0,"javascript:":!0},R={http:!0,https:!0,ftp:!0,gopher:!0,file:!0,"http:":!0,"https:":!0,"ftp:":!0,"gopher:":!0,"file:":!0},C=t("querystring");n.prototype.parse=function(t,e,r){if(!u(t))throw new TypeError("Parameter 'url' must be a string, not "+(typeof t==="undefined"?"undefined":_typeof(t)));var n=t;n=n.trim();var i=f.exec(n);if(i){i=i[0];var o=i.toLowerCase();this.protocol=o,n=n.substr(i.length);}if(r||i||n.match(/^\/\/[^@\/]+@[^@\/]+/)){var s="//"===n.substr(0,2);!s||i&&A[i]||(n=n.substr(2),this.slashes=!0);}if(!A[i]&&(s||i&&!R[i])){for(var a=-1,c=0;c<b.length;c++){var l=n.indexOf(b[c]);-1!==l&&(-1===a||a>l)&&(a=l);}var h,d;d=-1===a?n.lastIndexOf("@"):n.lastIndexOf("@",a),-1!==d&&(h=n.slice(0,d),n=n.slice(d+1),this.auth=decodeURIComponent(h)),a=-1;for(var c=0;c<v.length;c++){var l=n.indexOf(v[c]);-1!==l&&(-1===a||a>l)&&(a=l);}-1===a&&(a=n.length),this.host=n.slice(0,a),n=n.slice(a),this.parseHost(),this.hostname=this.hostname||"";var y="["===this.hostname[0]&&"]"===this.hostname[this.hostname.length-1];if(!y)for(var g=this.hostname.split(/\./),c=0,I=g.length;I>c;c++){var T=g[c];if(T&&!T.match(E)){for(var L="",_=0,j=T.length;j>_;_++){L+=T.charCodeAt(_)>127?"x":T[_];}if(!L.match(E)){var q=g.slice(0,c),D=g.slice(c+1),O=T.match(x);O&&(q.push(O[1]),D.unshift(O[2])),D.length&&(n="/"+D.join(".")+n),this.hostname=q.join(".");break;}}}if(this.hostname.length>w?this.hostname="":this.hostname=this.hostname.toLowerCase(),!y){for(var P=this.hostname.split("."),N=[],c=0;c<P.length;++c){var k=P[c];N.push(k.match(/[^A-Za-z0-9_-]/)?"xn--"+p.encode(k):k);}this.hostname=N.join(".");}var M=this.port?":"+this.port:"",U=this.hostname||"";this.host=U+M,this.href+=this.host,y&&(this.hostname=this.hostname.substr(1,this.hostname.length-2),"/"!==n[0]&&(n="/"+n));}if(!S[o])for(var c=0,I=m.length;I>c;c++){var B=m[c],F=encodeURIComponent(B);F===B&&(F=escape(B)),n=n.split(B).join(F);}var X=n.indexOf("#");-1!==X&&(this.hash=n.substr(X),n=n.slice(0,X));var z=n.indexOf("?");if(-1!==z?(this.search=n.substr(z),this.query=n.substr(z+1),e&&(this.query=C.parse(this.query)),n=n.slice(0,z)):e&&(this.search="",this.query={}),n&&(this.pathname=n),R[o]&&this.hostname&&!this.pathname&&(this.pathname="/"),this.pathname||this.search){var M=this.pathname||"",k=this.search||"";this.path=M+k;}return this.href=this.format(),this;},n.prototype.format=function(){var t=this.auth||"";t&&(t=encodeURIComponent(t),t=t.replace(/%3A/i,":"),t+="@");var e=this.protocol||"",r=this.pathname||"",n=this.hash||"",i=!1,o="";this.host?i=t+this.host:this.hostname&&(i=t+(-1===this.hostname.indexOf(":")?this.hostname:"["+this.hostname+"]"),this.port&&(i+=":"+this.port)),this.query&&c(this.query)&&Object.keys(this.query).length&&(o=C.stringify(this.query));var s=this.search||o&&"?"+o||"";return e&&":"!==e.substr(-1)&&(e+=":"),this.slashes||(!e||R[e])&&i!==!1?(i="//"+(i||""),r&&"/"!==r.charAt(0)&&(r="/"+r)):i||(i=""),n&&"#"!==n.charAt(0)&&(n="#"+n),s&&"?"!==s.charAt(0)&&(s="?"+s),r=r.replace(/[?#]/g,function(t){return encodeURIComponent(t);}),s=s.replace("#","%23"),e+i+r+s+n;},n.prototype.resolve=function(t){return this.resolveObject(i(t,!1,!0)).format();},n.prototype.resolveObject=function(t){if(u(t)){var e=new n();e.parse(t,!1,!0),t=e;}var r=new n();if(Object.keys(this).forEach(function(t){r[t]=this[t];},this),r.hash=t.hash,""===t.href)return r.href=r.format(),r;if(t.slashes&&!t.protocol)return Object.keys(t).forEach(function(e){"protocol"!==e&&(r[e]=t[e]);}),R[r.protocol]&&r.hostname&&!r.pathname&&(r.path=r.pathname="/"),r.href=r.format(),r;if(t.protocol&&t.protocol!==r.protocol){if(!R[t.protocol])return Object.keys(t).forEach(function(e){r[e]=t[e];}),r.href=r.format(),r;if(r.protocol=t.protocol,t.host||A[t.protocol])r.pathname=t.pathname;else {for(var i=(t.pathname||"").split("/");i.length&&!(t.host=i.shift());){}t.host||(t.host=""),t.hostname||(t.hostname=""),""!==i[0]&&i.unshift(""),i.length<2&&i.unshift(""),r.pathname=i.join("/");}if(r.search=t.search,r.query=t.query,r.host=t.host||"",r.auth=t.auth,r.hostname=t.hostname||t.host,r.port=t.port,r.pathname||r.search){var o=r.pathname||"",s=r.search||"";r.path=o+s;}return r.slashes=r.slashes||t.slashes,r.href=r.format(),r;}var a=r.pathname&&"/"===r.pathname.charAt(0),c=t.host||t.pathname&&"/"===t.pathname.charAt(0),p=c||a||r.host&&t.pathname,f=p,d=r.pathname&&r.pathname.split("/")||[],i=t.pathname&&t.pathname.split("/")||[],y=r.protocol&&!R[r.protocol];if(y&&(r.hostname="",r.port=null,r.host&&(""===d[0]?d[0]=r.host:d.unshift(r.host)),r.host="",t.protocol&&(t.hostname=null,t.port=null,t.host&&(""===i[0]?i[0]=t.host:i.unshift(t.host)),t.host=null),p=p&&(""===i[0]||""===d[0])),c)r.host=t.host||""===t.host?t.host:r.host,r.hostname=t.hostname||""===t.hostname?t.hostname:r.hostname,r.search=t.search,r.query=t.query,d=i;else if(i.length)d||(d=[]),d.pop(),d=d.concat(i),r.search=t.search,r.query=t.query;else if(!h(t.search)){if(y){r.hostname=r.host=d.shift();var g=r.host&&r.host.indexOf("@")>0?r.host.split("@"):!1;g&&(r.auth=g.shift(),r.host=r.hostname=g.shift());}return r.search=t.search,r.query=t.query,l(r.pathname)&&l(r.search)||(r.path=(r.pathname?r.pathname:"")+(r.search?r.search:"")),r.href=r.format(),r;}if(!d.length)return r.pathname=null,r.search?r.path="/"+r.search:r.path=null,r.href=r.format(),r;for(var m=d.slice(-1)[0],v=(r.host||t.host)&&("."===m||".."===m)||""===m,b=0,w=d.length;w>=0;w--){m=d[w],"."==m?d.splice(w,1):".."===m?(d.splice(w,1),b++):b&&(d.splice(w,1),b--);}if(!p&&!f)for(;b--;b){d.unshift("..");}!p||""===d[0]||d[0]&&"/"===d[0].charAt(0)||d.unshift(""),v&&"/"!==d.join("/").substr(-1)&&d.push("");var E=""===d[0]||d[0]&&"/"===d[0].charAt(0);if(y){r.hostname=r.host=E?"":d.length?d.shift():"";var g=r.host&&r.host.indexOf("@")>0?r.host.split("@"):!1;g&&(r.auth=g.shift(),r.host=r.hostname=g.shift());}return p=p||r.host&&d.length,p&&!E&&d.unshift(""),d.length?r.pathname=d.join("/"):(r.pathname=null,r.path=null),l(r.pathname)&&l(r.search)||(r.path=(r.pathname?r.pathname:"")+(r.search?r.search:"")),r.auth=t.auth||r.auth,r.slashes=r.slashes||t.slashes,r.href=r.format(),r;},n.prototype.parseHost=function(){var t=this.host,e=d.exec(t);e&&(e=e[0],":"!==e&&(this.port=e.substr(1)),t=t.substr(0,t.length-e.length)),t&&(this.hostname=t);};},{punycode:14,querystring:17}],17:[function(t,e,r){"use strict";r.decode=r.parse=t("./decode"),r.encode=r.stringify=t("./encode");},{"./decode":15,"./encode":16}],16:[function(t,e,r){"use strict";function n(t,e){if(t.map)return t.map(e);for(var r=[],n=0;n<t.length;n++){r.push(e(t[n],n));}return r;}var i=function i(t){switch(typeof t==="undefined"?"undefined":_typeof(t)){case "string":return t;case "boolean":return t?"true":"false";case "number":return isFinite(t)?t:"";default:return "";}};e.exports=function(t,e,r,a){return e=e||"&",r=r||"=",null===t&&(t=void 0),"object"==(typeof t==="undefined"?"undefined":_typeof(t))?n(s(t),function(s){var a=encodeURIComponent(i(s))+r;return o(t[s])?n(t[s],function(t){return a+encodeURIComponent(i(t));}).join(e):a+encodeURIComponent(i(t[s]));}).join(e):a?encodeURIComponent(i(a))+r+encodeURIComponent(i(t)):"";};var o=Array.isArray||function(t){return "[object Array]"===Object.prototype.toString.call(t);},s=Object.keys||function(t){var e=[];for(var r in t){Object.prototype.hasOwnProperty.call(t,r)&&e.push(r);}return e;};},{}],15:[function(t,e,r){"use strict";function n(t,e){return Object.prototype.hasOwnProperty.call(t,e);}e.exports=function(t,e,r,o){e=e||"&",r=r||"=";var s={};if("string"!=typeof t||0===t.length)return s;var a=/\+/g;t=t.split(e);var u=1e3;o&&"number"==typeof o.maxKeys&&(u=o.maxKeys);var c=t.length;u>0&&c>u&&(c=u);for(var l=0;c>l;++l){var h,p,f,d,y=t[l].replace(a,"%20"),g=y.indexOf(r);g>=0?(h=y.substr(0,g),p=y.substr(g+1)):(h=y,p=""),f=decodeURIComponent(h),d=decodeURIComponent(p),n(s,f)?i(s[f])?s[f].push(d):s[f]=[s[f],d]:s[f]=d;}return s;};var i=Array.isArray||function(t){return "[object Array]"===Object.prototype.toString.call(t);};},{}],14:[function(t,e,r){(function(t){!function(n){function i(t){throw RangeError(D[t]);}function o(t,e){for(var r=t.length;r--;){t[r]=e(t[r]);}return t;}function s(t,e){return o(t.split(q),e).join(".");}function a(t){for(var e,r,n=[],i=0,o=t.length;o>i;){e=t.charCodeAt(i++),e>=55296&&56319>=e&&o>i?(r=t.charCodeAt(i++),56320==(64512&r)?n.push(((1023&e)<<10)+(1023&r)+65536):(n.push(e),i--)):n.push(e);}return n;}function u(t){return o(t,function(t){var e="";return t>65535&&(t-=65536,e+=N(t>>>10&1023|55296),t=56320|1023&t),e+=N(t);}).join("");}function c(t){return 10>t-48?t-22:26>t-65?t-65:26>t-97?t-97:x;}function l(t,e){return t+22+75*(26>t)-((0!=e)<<5);}function h(t,e,r){var n=0;for(t=r?P(t/C):t>>1,t+=P(t/e);t>O*A>>1;n+=x){t=P(t/O);}return P(n+(O+1)*t/(t+R));}function p(t){var e,r,n,o,s,a,l,p,f,d,y=[],g=t.length,m=0,v=T,b=I;for(r=t.lastIndexOf(L),0>r&&(r=0),n=0;r>n;++n){t.charCodeAt(n)>=128&&i("not-basic"),y.push(t.charCodeAt(n));}for(o=r>0?r+1:0;g>o;){for(s=m,a=1,l=x;o>=g&&i("invalid-input"),p=c(t.charCodeAt(o++)),(p>=x||p>P((E-m)/a))&&i("overflow"),m+=p*a,f=b>=l?S:l>=b+A?A:l-b,!(f>p);l+=x){d=x-f,a>P(E/d)&&i("overflow"),a*=d;}e=y.length+1,b=h(m-s,e,0==s),P(m/e)>E-v&&i("overflow"),v+=P(m/e),m%=e,y.splice(m++,0,v);}return u(y);}function f(t){var e,r,n,o,s,u,c,p,f,d,y,g,m,v,b,w=[];for(t=a(t),g=t.length,e=T,r=0,s=I,u=0;g>u;++u){y=t[u],128>y&&w.push(N(y));}for(n=o=w.length,o&&w.push(L);g>n;){for(c=E,u=0;g>u;++u){y=t[u],y>=e&&c>y&&(c=y);}for(m=n+1,c-e>P((E-r)/m)&&i("overflow"),r+=(c-e)*m,e=c,u=0;g>u;++u){if(y=t[u],e>y&&++r>E&&i("overflow"),y==e){for(p=r,f=x;d=s>=f?S:f>=s+A?A:f-s,!(d>p);f+=x){b=p-d,v=x-d,w.push(N(l(d+b%v,0))),p=P(b/v);}w.push(N(l(p,0))),s=h(r,m,n==o),r=0,++n;}}++r,++e;}return w.join("");}function d(t){return s(t,function(t){return _.test(t)?p(t.slice(4).toLowerCase()):t;});}function y(t){return s(t,function(t){return j.test(t)?"xn--"+f(t):t;});}var g="object"==(typeof r==="undefined"?"undefined":_typeof(r))&&r,m="object"==(typeof e==="undefined"?"undefined":_typeof(e))&&e&&e.exports==g&&e,v="object"==(typeof t==="undefined"?"undefined":_typeof(t))&&t;(v.global===v||v.window===v)&&(n=v);var b,w,E=2147483647,x=36,S=1,A=26,R=38,C=700,I=72,T=128,L="-",_=/^xn--/,j=/[^ -~]/,q=/\x2E|\u3002|\uFF0E|\uFF61/g,D={overflow:"Overflow: input needs wider integers to process","not-basic":"Illegal input >= 0x80 (not a basic code point)","invalid-input":"Invalid input"},O=x-S,P=Math.floor,N=String.fromCharCode;if(b={version:"1.2.4",ucs2:{decode:a,encode:u},decode:p,encode:f,toASCII:y,toUnicode:d},"function"==typeof define&&"object"==_typeof(define.amd)&&define.amd)define("punycode",function(){return b;});else if(g&&!g.nodeType){if(m)m.exports=b;else for(w in b){b.hasOwnProperty(w)&&(g[w]=b[w]);}}else n.punycode=b;}(this);}).call(this,"undefined"!=typeof global?global:"undefined"!=typeof self?self:"undefined"!=typeof window?window:{});},{}],13:[function(t,e,r){function n(){if(!a){a=!0;for(var t,e=s.length;e;){t=s,s=[];for(var r=-1;++r<e;){t[r]();}e=s.length;}a=!1;}}function i(){}var o=e.exports={},s=[],a=!1;o.nextTick=function(t){s.push(t),a||setTimeout(n,0);},o.title="browser",o.browser=!0,o.env={},o.argv=[],o.version="",o.versions={},o.on=i,o.addListener=i,o.once=i,o.off=i,o.removeListener=i,o.removeAllListeners=i,o.emit=i,o.binding=function(t){throw new Error("process.binding is not supported");},o.cwd=function(){return "/";},o.chdir=function(t){throw new Error("process.chdir is not supported");},o.umask=function(){return 0;};},{}],12:[function(t,e,r){"function"==typeof Object.create?e.exports=function(t,e){t.super_=e,t.prototype=Object.create(e.prototype,{constructor:{value:t,enumerable:!1,writable:!0,configurable:!0}});}:e.exports=function(t,e){t.super_=e;var r=function r(){};r.prototype=e.prototype,t.prototype=new r(),t.prototype.constructor=t;};},{}],6:[function(t,e,r){function n(t,e,r){a.isBuffer(e)||(e=new a(e)),a.isBuffer(r)||(r=new a(r)),e.length>f?e=t(e):e.length<f&&(e=a.concat([e,d],f));for(var n=new a(f),i=new a(f),o=0;f>o;o++){n[o]=54^e[o],i[o]=92^e[o];}var s=t(a.concat([n,r]));return t(a.concat([i,s]));}function i(t,e){t=t||"sha1";var r=p[t],i=[],s=0;return r||o("algorithm:",t,"is not yet supported"),{update:function update(t){return a.isBuffer(t)||(t=new a(t)),i.push(t),s+=t.length,this;},digest:function digest(t){var o=a.concat(i),s=e?n(r,e,o):r(o);return i=null,t?s.toString(t):s;}};}function o(){var t=[].slice.call(arguments).join(" ");throw new Error([t,"we accept pull requests","http://github.com/dominictarr/crypto-browserify"].join("\n"));}function s(t,e){for(var r in t){e(t[r],r);}}var a=t("buffer").Buffer,u=t("./sha"),c=t("./sha256"),l=t("./rng"),h=t("./md5"),p={sha1:u,sha256:c,md5:h},f=64,d=new a(f);d.fill(0),r.createHash=function(t){return i(t);},r.createHmac=function(t,e){return i(t,e);},r.randomBytes=function(t,e){if(!e||!e.call)return new a(l(t));try{e.call(this,void 0,new a(l(t)));}catch(r){e(r);}},s(["createCredentials","createCipher","createCipheriv","createDecipher","createDecipheriv","createSign","createVerify","createDiffieHellman","pbkdf2"],function(t){r[t]=function(){o("sorry,",t,"is not implemented yet");};});},{"./md5":7,"./rng":8,"./sha":9,"./sha256":10,buffer:1}],10:[function(t,e,r){var n=t("./helpers"),i=function i(t,e){var r=(65535&t)+(65535&e),n=(t>>16)+(e>>16)+(r>>16);return n<<16|65535&r;},o=function o(t,e){return t>>>e|t<<32-e;},s=function s(t,e){return t>>>e;},a=function a(t,e,r){return t&e^~t&r;},u=function u(t,e,r){return t&e^t&r^e&r;},c=function c(t){return o(t,2)^o(t,13)^o(t,22);},l=function l(t){return o(t,6)^o(t,11)^o(t,25);},h=function h(t){return o(t,7)^o(t,18)^s(t,3);},p=function p(t){return o(t,17)^o(t,19)^s(t,10);},f=function f(t,e){var r,n,o,s,f,d,y,g,m,v,b,w,E=new Array(1116352408,1899447441,3049323471,3921009573,961987163,1508970993,2453635748,2870763221,3624381080,310598401,607225278,1426881987,1925078388,2162078206,2614888103,3248222580,3835390401,4022224774,264347078,604807628,770255983,1249150122,1555081692,1996064986,2554220882,2821834349,2952996808,3210313671,3336571891,3584528711,113926993,338241895,666307205,773529912,1294757372,1396182291,1695183700,1986661051,2177026350,2456956037,2730485921,2820302411,3259730800,3345764771,3516065817,3600352804,4094571909,275423344,430227734,506948616,659060556,883997877,958139571,1322822218,1537002063,1747873779,1955562222,2024104815,2227730452,2361852424,2428436474,2756734187,3204031479,3329325298),x=new Array(1779033703,3144134277,1013904242,2773480762,1359893119,2600822924,528734635,1541459225),S=new Array(64);t[e>>5]|=128<<24-e%32,t[(e+64>>9<<4)+15]=e;for(var m=0;m<t.length;m+=16){r=x[0],n=x[1],o=x[2],s=x[3],f=x[4],d=x[5],y=x[6],g=x[7];for(var v=0;64>v;v++){16>v?S[v]=t[v+m]:S[v]=i(i(i(p(S[v-2]),S[v-7]),h(S[v-15])),S[v-16]),b=i(i(i(i(g,l(f)),a(f,d,y)),E[v]),S[v]),w=i(c(r),u(r,n,o)),g=y,y=d,d=f,f=i(s,b),s=o,o=n,n=r,r=i(b,w);}x[0]=i(r,x[0]),x[1]=i(n,x[1]),x[2]=i(o,x[2]),x[3]=i(s,x[3]),x[4]=i(f,x[4]),x[5]=i(d,x[5]),x[6]=i(y,x[6]),x[7]=i(g,x[7]);}return x;};e.exports=function(t){return n.hash(t,f,32,!0);};},{"./helpers":5}],9:[function(t,e,r){function n(t,e){t[e>>5]|=128<<24-e%32,t[(e+64>>9<<4)+15]=e;for(var r=Array(80),n=1732584193,u=-271733879,c=-1732584194,l=271733878,h=-1009589776,p=0;p<t.length;p+=16){for(var f=n,d=u,y=c,g=l,m=h,v=0;80>v;v++){16>v?r[v]=t[p+v]:r[v]=a(r[v-3]^r[v-8]^r[v-14]^r[v-16],1);var b=s(s(a(n,5),i(v,u,c,l)),s(s(h,r[v]),o(v)));h=l,l=c,c=a(u,30),u=n,n=b;}n=s(n,f),u=s(u,d),c=s(c,y),l=s(l,g),h=s(h,m);}return Array(n,u,c,l,h);}function i(t,e,r,n){return 20>t?e&r|~e&n:40>t?e^r^n:60>t?e&r|e&n|r&n:e^r^n;}function o(t){return 20>t?1518500249:40>t?1859775393:60>t?-1894007588:-899497514;}function s(t,e){var r=(65535&t)+(65535&e),n=(t>>16)+(e>>16)+(r>>16);return n<<16|65535&r;}function a(t,e){return t<<e|t>>>32-e;}var u=t("./helpers");e.exports=function(t){return u.hash(t,n,20,!0);};},{"./helpers":5}],8:[function(t,e,r){!function(){var t,r,n=this;t=function t(_t5){for(var e,e,r=new Array(_t5),n=0;_t5>n;n++){0==(3&n)&&(e=4294967296*Math.random()),r[n]=e>>>((3&n)<<3)&255;}return r;},n.crypto&&crypto.getRandomValues&&(r=function r(t){var e=new Uint8Array(t);return crypto.getRandomValues(e),e;}),e.exports=r||t;}();},{}],7:[function(t,e,r){function n(t,e){t[e>>5]|=128<<e%32,t[(e+64>>>9<<4)+14]=e;for(var r=1732584193,n=-271733879,i=-1732584194,l=271733878,h=0;h<t.length;h+=16){var p=r,f=n,d=i,y=l;r=o(r,n,i,l,t[h+0],7,-680876936),l=o(l,r,n,i,t[h+1],12,-389564586),i=o(i,l,r,n,t[h+2],17,606105819),n=o(n,i,l,r,t[h+3],22,-1044525330),r=o(r,n,i,l,t[h+4],7,-176418897),l=o(l,r,n,i,t[h+5],12,1200080426),i=o(i,l,r,n,t[h+6],17,-1473231341),n=o(n,i,l,r,t[h+7],22,-45705983),r=o(r,n,i,l,t[h+8],7,1770035416),l=o(l,r,n,i,t[h+9],12,-1958414417),i=o(i,l,r,n,t[h+10],17,-42063),n=o(n,i,l,r,t[h+11],22,-1990404162),r=o(r,n,i,l,t[h+12],7,1804603682),l=o(l,r,n,i,t[h+13],12,-40341101),i=o(i,l,r,n,t[h+14],17,-1502002290),n=o(n,i,l,r,t[h+15],22,1236535329),r=s(r,n,i,l,t[h+1],5,-165796510),l=s(l,r,n,i,t[h+6],9,-1069501632),i=s(i,l,r,n,t[h+11],14,643717713),n=s(n,i,l,r,t[h+0],20,-373897302),r=s(r,n,i,l,t[h+5],5,-701558691),l=s(l,r,n,i,t[h+10],9,38016083),i=s(i,l,r,n,t[h+15],14,-660478335),n=s(n,i,l,r,t[h+4],20,-405537848),r=s(r,n,i,l,t[h+9],5,568446438),l=s(l,r,n,i,t[h+14],9,-1019803690),i=s(i,l,r,n,t[h+3],14,-187363961),n=s(n,i,l,r,t[h+8],20,1163531501),r=s(r,n,i,l,t[h+13],5,-1444681467),l=s(l,r,n,i,t[h+2],9,-51403784),i=s(i,l,r,n,t[h+7],14,1735328473),n=s(n,i,l,r,t[h+12],20,-1926607734),r=a(r,n,i,l,t[h+5],4,-378558),l=a(l,r,n,i,t[h+8],11,-2022574463),i=a(i,l,r,n,t[h+11],16,1839030562),n=a(n,i,l,r,t[h+14],23,-35309556),r=a(r,n,i,l,t[h+1],4,-1530992060),l=a(l,r,n,i,t[h+4],11,1272893353),i=a(i,l,r,n,t[h+7],16,-155497632),n=a(n,i,l,r,t[h+10],23,-1094730640),r=a(r,n,i,l,t[h+13],4,681279174),l=a(l,r,n,i,t[h+0],11,-358537222),i=a(i,l,r,n,t[h+3],16,-722521979),n=a(n,i,l,r,t[h+6],23,76029189),r=a(r,n,i,l,t[h+9],4,-640364487),l=a(l,r,n,i,t[h+12],11,-421815835),i=a(i,l,r,n,t[h+15],16,530742520),n=a(n,i,l,r,t[h+2],23,-995338651),r=u(r,n,i,l,t[h+0],6,-198630844),l=u(l,r,n,i,t[h+7],10,1126891415),i=u(i,l,r,n,t[h+14],15,-1416354905),n=u(n,i,l,r,t[h+5],21,-57434055),r=u(r,n,i,l,t[h+12],6,1700485571),l=u(l,r,n,i,t[h+3],10,-1894986606),i=u(i,l,r,n,t[h+10],15,-1051523),n=u(n,i,l,r,t[h+1],21,-2054922799),r=u(r,n,i,l,t[h+8],6,1873313359),l=u(l,r,n,i,t[h+15],10,-30611744),i=u(i,l,r,n,t[h+6],15,-1560198380),n=u(n,i,l,r,t[h+13],21,1309151649),r=u(r,n,i,l,t[h+4],6,-145523070),l=u(l,r,n,i,t[h+11],10,-1120210379),i=u(i,l,r,n,t[h+2],15,718787259),n=u(n,i,l,r,t[h+9],21,-343485551),r=c(r,p),n=c(n,f),i=c(i,d),l=c(l,y);}return Array(r,n,i,l);}function i(t,e,r,n,i,o){return c(l(c(c(e,t),c(n,o)),i),r);}function o(t,e,r,n,o,s,a){return i(e&r|~e&n,t,e,o,s,a);}function s(t,e,r,n,o,s,a){return i(e&n|r&~n,t,e,o,s,a);}function a(t,e,r,n,o,s,a){return i(e^r^n,t,e,o,s,a);}function u(t,e,r,n,o,s,a){return i(r^(e|~n),t,e,o,s,a);}function c(t,e){var r=(65535&t)+(65535&e),n=(t>>16)+(e>>16)+(r>>16);return n<<16|65535&r;}function l(t,e){return t<<e|t>>>32-e;}var h=t("./helpers");e.exports=function(t){return h.hash(t,n,16);};},{"./helpers":5}],5:[function(t,e,r){function n(t,e){if(t.length%a!==0){var r=t.length+(a-t.length%a);t=s.concat([t,u],r);}for(var n=[],i=e?t.readInt32BE:t.readInt32LE,o=0;o<t.length;o+=a){n.push(i.call(t,o));}return n;}function i(t,e,r){for(var n=new s(e),i=r?n.writeInt32BE:n.writeInt32LE,o=0;o<t.length;o++){i.call(n,t[o],4*o,!0);}return n;}function o(t,e,r,o){s.isBuffer(t)||(t=new s(t));var a=e(n(t,o),t.length*c);return i(a,r,o);}var s=t("buffer").Buffer,a=4,u=new s(a);u.fill(0);var c=8;e.exports={hash:o};},{buffer:1}],1:[function(t,e,r){function n(){return i.TYPED_ARRAY_SUPPORT?2147483647:1073741823;}function i(t){return this instanceof i?(this.length=0,this.parent=void 0,"number"==typeof t?o(this,t):"string"==typeof t?s(this,t,arguments.length>1?arguments[1]:"utf8"):a(this,t)):arguments.length>1?new i(t,arguments[1]):new i(t);}function o(t,e){if(t=f(t,0>e?0:0|d(e)),!i.TYPED_ARRAY_SUPPORT)for(var r=0;e>r;r++){t[r]=0;}return t;}function s(t,e,r){("string"!=typeof r||""===r)&&(r="utf8");var n=0|g(e,r);return t=f(t,n),t.write(e,r),t;}function a(t,e){if(i.isBuffer(e))return u(t,e);if(Y(e))return c(t,e);if(null==e)throw new TypeError("must start with number, buffer, array or string");return "undefined"!=typeof ArrayBuffer&&e.buffer instanceof ArrayBuffer?l(t,e):e.length?h(t,e):p(t,e);}function u(t,e){var r=0|d(e.length);return t=f(t,r),e.copy(t,0,0,r),t;}function c(t,e){var r=0|d(e.length);t=f(t,r);for(var n=0;r>n;n+=1){t[n]=255&e[n];}return t;}function l(t,e){var r=0|d(e.length);t=f(t,r);for(var n=0;r>n;n+=1){t[n]=255&e[n];}return t;}function h(t,e){var r=0|d(e.length);t=f(t,r);for(var n=0;r>n;n+=1){t[n]=255&e[n];}return t;}function p(t,e){var r,n=0;"Buffer"===e.type&&Y(e.data)&&(r=e.data,n=0|d(r.length)),t=f(t,n);for(var i=0;n>i;i+=1){t[i]=255&r[i];}return t;}function f(t,e){i.TYPED_ARRAY_SUPPORT?t=i._augment(new Uint8Array(e)):(t.length=e,t._isBuffer=!0);var r=0!==e&&e<=i.poolSize>>>1;return r&&(t.parent=$),t;}function d(t){if(t>=n())throw new RangeError("Attempt to allocate Buffer larger than maximum size: 0x"+n().toString(16)+" bytes");return 0|t;}function y(t,e){if(!(this instanceof y))return new y(t,e);var r=new i(t,e);return delete r.parent,r;}function g(t,e){"string"!=typeof t&&(t=""+t);var r=t.length;if(0===r)return 0;for(var n=!1;;){switch(e){case "ascii":case "binary":case "raw":case "raws":return r;case "utf8":case "utf-8":return B(t).length;case "ucs2":case "ucs-2":case "utf16le":case "utf-16le":return 2*r;case "hex":return r>>>1;case "base64":return z(t).length;default:if(n)return B(t).length;e=(""+e).toLowerCase(),n=!0;}}}function m(t,e,r){var n=!1;if(e=0|e,r=void 0===r||r===1/0?this.length:0|r,t||(t="utf8"),0>e&&(e=0),r>this.length&&(r=this.length),e>=r)return "";for(;;){switch(t){case "hex":return T(this,e,r);case "utf8":case "utf-8":return R(this,e,r);case "ascii":return C(this,e,r);case "binary":return I(this,e,r);case "base64":return A(this,e,r);case "ucs2":case "ucs-2":case "utf16le":case "utf-16le":return L(this,e,r);default:if(n)throw new TypeError("Unknown encoding: "+t);t=(t+"").toLowerCase(),n=!0;}}}function v(t,e,r,n){r=Number(r)||0;var i=t.length-r;n?(n=Number(n),n>i&&(n=i)):n=i;var o=e.length;if(o%2!==0)throw new Error("Invalid hex string");n>o/2&&(n=o/2);for(var s=0;n>s;s++){var a=parseInt(e.substr(2*s,2),16);if(isNaN(a))throw new Error("Invalid hex string");t[r+s]=a;}return s;}function b(t,e,r,n){return V(B(e,t.length-r),t,r,n);}function w(t,e,r,n){return V(F(e),t,r,n);}function E(t,e,r,n){return w(t,e,r,n);}function x(t,e,r,n){return V(z(e),t,r,n);}function S(t,e,r,n){return V(X(e,t.length-r),t,r,n);}function A(t,e,r){return 0===e&&r===t.length?K.fromByteArray(t):K.fromByteArray(t.slice(e,r));}function R(t,e,r){var n="",i="";r=Math.min(t.length,r);for(var o=e;r>o;o++){t[o]<=127?(n+=H(i)+String.fromCharCode(t[o]),i=""):i+="%"+t[o].toString(16);}return n+H(i);}function C(t,e,r){var n="";r=Math.min(t.length,r);for(var i=e;r>i;i++){n+=String.fromCharCode(127&t[i]);}return n;}function I(t,e,r){var n="";r=Math.min(t.length,r);for(var i=e;r>i;i++){n+=String.fromCharCode(t[i]);}return n;}function T(t,e,r){var n=t.length;(!e||0>e)&&(e=0),(!r||0>r||r>n)&&(r=n);for(var i="",o=e;r>o;o++){i+=U(t[o]);}return i;}function L(t,e,r){for(var n=t.slice(e,r),i="",o=0;o<n.length;o+=2){i+=String.fromCharCode(n[o]+256*n[o+1]);}return i;}function _(t,e,r){if(t%1!==0||0>t)throw new RangeError("offset is not uint");if(t+e>r)throw new RangeError("Trying to access beyond buffer length");}function j(t,e,r,n,o,s){if(!i.isBuffer(t))throw new TypeError("buffer must be a Buffer instance");if(e>o||s>e)throw new RangeError("value is out of bounds");if(r+n>t.length)throw new RangeError("index out of range");}function q(t,e,r,n){0>e&&(e=65535+e+1);for(var i=0,o=Math.min(t.length-r,2);o>i;i++){t[r+i]=(e&255<<8*(n?i:1-i))>>>8*(n?i:1-i);}}function D(t,e,r,n){0>e&&(e=4294967295+e+1);for(var i=0,o=Math.min(t.length-r,4);o>i;i++){t[r+i]=e>>>8*(n?i:3-i)&255;}}function O(t,e,r,n,i,o){if(e>i||o>e)throw new RangeError("value is out of bounds");if(r+n>t.length)throw new RangeError("index out of range");if(0>r)throw new RangeError("index out of range");}function P(t,e,r,n,i){return i||O(t,e,r,4,3.4028234663852886e38,-3.4028234663852886e38),W.write(t,e,r,n,23,4),r+4;}function N(t,e,r,n,i){return i||O(t,e,r,8,1.7976931348623157e308,-1.7976931348623157e308),W.write(t,e,r,n,52,8),r+8;}function k(t){if(t=M(t).replace(J,""),t.length<2)return "";for(;t.length%4!==0;){t+="=";}return t;}function M(t){return t.trim?t.trim():t.replace(/^\s+|\s+$/g,"");}function U(t){return 16>t?"0"+t.toString(16):t.toString(16);}function B(t,e){e=e||1/0;for(var r,n=t.length,i=null,o=[],s=0;n>s;s++){if(r=t.charCodeAt(s),r>55295&&57344>r){if(!i){if(r>56319){(e-=3)>-1&&o.push(239,191,189);continue;}if(s+1===n){(e-=3)>-1&&o.push(239,191,189);continue;}i=r;continue;}if(56320>r){(e-=3)>-1&&o.push(239,191,189),i=r;continue;}r=i-55296<<10|r-56320|65536,i=null;}else i&&((e-=3)>-1&&o.push(239,191,189),i=null);if(128>r){if((e-=1)<0)break;o.push(r);}else if(2048>r){if((e-=2)<0)break;o.push(r>>6|192,63&r|128);}else if(65536>r){if((e-=3)<0)break;o.push(r>>12|224,r>>6&63|128,63&r|128);}else {if(!(2097152>r))throw new Error("Invalid code point");if((e-=4)<0)break;o.push(r>>18|240,r>>12&63|128,r>>6&63|128,63&r|128);}}return o;}function F(t){for(var e=[],r=0;r<t.length;r++){e.push(255&t.charCodeAt(r));}return e;}function X(t,e){for(var r,n,i,o=[],s=0;s<t.length&&!((e-=2)<0);s++){r=t.charCodeAt(s),n=r>>8,i=r%256,o.push(i),o.push(n);}return o;}function z(t){return K.toByteArray(k(t));}function V(t,e,r,n){for(var i=0;n>i&&!(i+r>=e.length||i>=t.length);i++){e[i+r]=t[i];}return i;}function H(t){try{return decodeURIComponent(t);}catch(e){return String.fromCharCode(65533);}}var K=t("base64-js"),W=t("ieee754"),Y=t("is-array");r.Buffer=i,r.SlowBuffer=y,r.INSPECT_MAX_BYTES=50,i.poolSize=8192;var $={};i.TYPED_ARRAY_SUPPORT=function(){try{var t=new ArrayBuffer(0),e=new Uint8Array(t);return e.foo=function(){return 42;},42===e.foo()&&"function"==typeof e.subarray&&0===new Uint8Array(1).subarray(1,1).byteLength;}catch(r){return !1;}}(),i.isBuffer=function(t){return !(null==t||!t._isBuffer);},i.compare=function(t,e){if(!i.isBuffer(t)||!i.isBuffer(e))throw new TypeError("Arguments must be Buffers");if(t===e)return 0;for(var r=t.length,n=e.length,o=0,s=Math.min(r,n);s>o&&t[o]===e[o];){++o;}return o!==s&&(r=t[o],n=e[o]),n>r?-1:r>n?1:0;},i.isEncoding=function(t){switch(String(t).toLowerCase()){case "hex":case "utf8":case "utf-8":case "ascii":case "binary":case "base64":case "raw":case "ucs2":case "ucs-2":case "utf16le":case "utf-16le":return !0;default:return !1;}},i.concat=function(t,e){if(!Y(t))throw new TypeError("list argument must be an Array of Buffers.");if(0===t.length)return new i(0);if(1===t.length)return t[0];var r;if(void 0===e)for(e=0,r=0;r<t.length;r++){e+=t[r].length;}var n=new i(e),o=0;for(r=0;r<t.length;r++){var s=t[r];s.copy(n,o),o+=s.length;}return n;},i.byteLength=g,i.prototype.length=void 0,i.prototype.parent=void 0,i.prototype.toString=function(){var t=0|this.length;return 0===t?"":0===arguments.length?R(this,0,t):m.apply(this,arguments);},i.prototype.equals=function(t){if(!i.isBuffer(t))throw new TypeError("Argument must be a Buffer");return this===t?!0:0===i.compare(this,t);},i.prototype.inspect=function(){var t="",e=r.INSPECT_MAX_BYTES;return this.length>0&&(t=this.toString("hex",0,e).match(/.{2}/g).join(" "),this.length>e&&(t+=" ... ")),"<Buffer "+t+">";},i.prototype.compare=function(t){if(!i.isBuffer(t))throw new TypeError("Argument must be a Buffer");return this===t?0:i.compare(this,t);},i.prototype.indexOf=function(t,e){function r(t,e,r){for(var n=-1,i=0;r+i<t.length;i++){if(t[r+i]===e[-1===n?0:i-n]){if(-1===n&&(n=i),i-n+1===e.length)return r+n;}else n=-1;}return -1;}if(e>2147483647?e=2147483647:-2147483648>e&&(e=-2147483648),e>>=0,0===this.length)return -1;if(e>=this.length)return -1;if(0>e&&(e=Math.max(this.length+e,0)),"string"==typeof t)return 0===t.length?-1:String.prototype.indexOf.call(this,t,e);if(i.isBuffer(t))return r(this,t,e);if("number"==typeof t)return i.TYPED_ARRAY_SUPPORT&&"function"===Uint8Array.prototype.indexOf?Uint8Array.prototype.indexOf.call(this,t,e):r(this,[t],e);throw new TypeError("val must be string, number or Buffer");},i.prototype.get=function(t){return console.log(".get() is deprecated. Access using array indexes instead."),this.readUInt8(t);},i.prototype.set=function(t,e){return console.log(".set() is deprecated. Access using array indexes instead."),this.writeUInt8(t,e);},i.prototype.write=function(t,e,r,n){if(void 0===e)n="utf8",r=this.length,e=0;else if(void 0===r&&"string"==typeof e)n=e,r=this.length,e=0;else if(isFinite(e))e=0|e,isFinite(r)?(r=0|r,void 0===n&&(n="utf8")):(n=r,r=void 0);else {var i=n;n=e,e=0|r,r=i;}var o=this.length-e;if((void 0===r||r>o)&&(r=o),t.length>0&&(0>r||0>e)||e>this.length)throw new RangeError("attempt to write outside buffer bounds");n||(n="utf8");for(var s=!1;;){switch(n){case "hex":return v(this,t,e,r);case "utf8":case "utf-8":return b(this,t,e,r);case "ascii":return w(this,t,e,r);case "binary":return E(this,t,e,r);case "base64":return x(this,t,e,r);case "ucs2":case "ucs-2":case "utf16le":case "utf-16le":return S(this,t,e,r);default:if(s)throw new TypeError("Unknown encoding: "+n);n=(""+n).toLowerCase(),s=!0;}}},i.prototype.toJSON=function(){return {type:"Buffer",data:Array.prototype.slice.call(this._arr||this,0)};},i.prototype.slice=function(t,e){var r=this.length;t=~ ~t,e=void 0===e?r:~ ~e,0>t?(t+=r,0>t&&(t=0)):t>r&&(t=r),0>e?(e+=r,0>e&&(e=0)):e>r&&(e=r),t>e&&(e=t);var n;if(i.TYPED_ARRAY_SUPPORT)n=i._augment(this.subarray(t,e));else {var o=e-t;n=new i(o,void 0);for(var s=0;o>s;s++){n[s]=this[s+t];}}return n.length&&(n.parent=this.parent||this),n;},i.prototype.readUIntLE=function(t,e,r){t=0|t,e=0|e,r||_(t,e,this.length);for(var n=this[t],i=1,o=0;++o<e&&(i*=256);){n+=this[t+o]*i;}return n;},i.prototype.readUIntBE=function(t,e,r){t=0|t,e=0|e,r||_(t,e,this.length);for(var n=this[t+--e],i=1;e>0&&(i*=256);){n+=this[t+--e]*i;}return n;},i.prototype.readUInt8=function(t,e){return e||_(t,1,this.length),this[t];},i.prototype.readUInt16LE=function(t,e){return e||_(t,2,this.length),this[t]|this[t+1]<<8;},i.prototype.readUInt16BE=function(t,e){return e||_(t,2,this.length),this[t]<<8|this[t+1];},i.prototype.readUInt32LE=function(t,e){return e||_(t,4,this.length),(this[t]|this[t+1]<<8|this[t+2]<<16)+16777216*this[t+3];},i.prototype.readUInt32BE=function(t,e){return e||_(t,4,this.length),16777216*this[t]+(this[t+1]<<16|this[t+2]<<8|this[t+3]);},i.prototype.readIntLE=function(t,e,r){t=0|t,e=0|e,r||_(t,e,this.length);for(var n=this[t],i=1,o=0;++o<e&&(i*=256);){n+=this[t+o]*i;}return i*=128,n>=i&&(n-=Math.pow(2,8*e)),n;},i.prototype.readIntBE=function(t,e,r){t=0|t,e=0|e,r||_(t,e,this.length);for(var n=e,i=1,o=this[t+--n];n>0&&(i*=256);){o+=this[t+--n]*i;}return i*=128,o>=i&&(o-=Math.pow(2,8*e)),o;},i.prototype.readInt8=function(t,e){return e||_(t,1,this.length),128&this[t]?-1*(255-this[t]+1):this[t];},i.prototype.readInt16LE=function(t,e){e||_(t,2,this.length);var r=this[t]|this[t+1]<<8;return 32768&r?4294901760|r:r;},i.prototype.readInt16BE=function(t,e){e||_(t,2,this.length);var r=this[t+1]|this[t]<<8;return 32768&r?4294901760|r:r;},i.prototype.readInt32LE=function(t,e){return e||_(t,4,this.length),this[t]|this[t+1]<<8|this[t+2]<<16|this[t+3]<<24;},i.prototype.readInt32BE=function(t,e){return e||_(t,4,this.length),this[t]<<24|this[t+1]<<16|this[t+2]<<8|this[t+3];},i.prototype.readFloatLE=function(t,e){return e||_(t,4,this.length),W.read(this,t,!0,23,4);},i.prototype.readFloatBE=function(t,e){return e||_(t,4,this.length),W.read(this,t,!1,23,4);},i.prototype.readDoubleLE=function(t,e){return e||_(t,8,this.length),W.read(this,t,!0,52,8);},i.prototype.readDoubleBE=function(t,e){return e||_(t,8,this.length),W.read(this,t,!1,52,8);},i.prototype.writeUIntLE=function(t,e,r,n){t=+t,e=0|e,r=0|r,n||j(this,t,e,r,Math.pow(2,8*r),0);var i=1,o=0;for(this[e]=255&t;++o<r&&(i*=256);){this[e+o]=t/i&255;}return e+r;},i.prototype.writeUIntBE=function(t,e,r,n){t=+t,e=0|e,r=0|r,n||j(this,t,e,r,Math.pow(2,8*r),0);var i=r-1,o=1;for(this[e+i]=255&t;--i>=0&&(o*=256);){this[e+i]=t/o&255;}return e+r;},i.prototype.writeUInt8=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,1,255,0),i.TYPED_ARRAY_SUPPORT||(t=Math.floor(t)),this[e]=t,e+1;},i.prototype.writeUInt16LE=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,2,65535,0),i.TYPED_ARRAY_SUPPORT?(this[e]=t,this[e+1]=t>>>8):q(this,t,e,!0),e+2;},i.prototype.writeUInt16BE=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,2,65535,0),i.TYPED_ARRAY_SUPPORT?(this[e]=t>>>8,this[e+1]=t):q(this,t,e,!1),e+2;},i.prototype.writeUInt32LE=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,4,4294967295,0),i.TYPED_ARRAY_SUPPORT?(this[e+3]=t>>>24,this[e+2]=t>>>16,this[e+1]=t>>>8,this[e]=t):D(this,t,e,!0),e+4;},i.prototype.writeUInt32BE=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,4,4294967295,0),i.TYPED_ARRAY_SUPPORT?(this[e]=t>>>24,this[e+1]=t>>>16,this[e+2]=t>>>8,this[e+3]=t):D(this,t,e,!1),e+4;},i.prototype.writeIntLE=function(t,e,r,n){if(t=+t,e=0|e,!n){var i=Math.pow(2,8*r-1);j(this,t,e,r,i-1,-i);}var o=0,s=1,a=0>t?1:0;for(this[e]=255&t;++o<r&&(s*=256);){this[e+o]=(t/s>>0)-a&255;}return e+r;},i.prototype.writeIntBE=function(t,e,r,n){if(t=+t,e=0|e,!n){var i=Math.pow(2,8*r-1);j(this,t,e,r,i-1,-i);}var o=r-1,s=1,a=0>t?1:0;for(this[e+o]=255&t;--o>=0&&(s*=256);){this[e+o]=(t/s>>0)-a&255;}return e+r;},i.prototype.writeInt8=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,1,127,-128),i.TYPED_ARRAY_SUPPORT||(t=Math.floor(t)),0>t&&(t=255+t+1),this[e]=t,e+1;},i.prototype.writeInt16LE=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,2,32767,-32768),i.TYPED_ARRAY_SUPPORT?(this[e]=t,this[e+1]=t>>>8):q(this,t,e,!0),e+2;},i.prototype.writeInt16BE=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,2,32767,-32768),i.TYPED_ARRAY_SUPPORT?(this[e]=t>>>8,this[e+1]=t):q(this,t,e,!1),e+2;},i.prototype.writeInt32LE=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,4,2147483647,-2147483648),i.TYPED_ARRAY_SUPPORT?(this[e]=t,this[e+1]=t>>>8,this[e+2]=t>>>16,this[e+3]=t>>>24):D(this,t,e,!0),e+4;},i.prototype.writeInt32BE=function(t,e,r){return t=+t,e=0|e,r||j(this,t,e,4,2147483647,-2147483648),0>t&&(t=4294967295+t+1),i.TYPED_ARRAY_SUPPORT?(this[e]=t>>>24,this[e+1]=t>>>16,this[e+2]=t>>>8,this[e+3]=t):D(this,t,e,!1),e+4;},i.prototype.writeFloatLE=function(t,e,r){return P(this,t,e,!0,r);},i.prototype.writeFloatBE=function(t,e,r){return P(this,t,e,!1,r);},i.prototype.writeDoubleLE=function(t,e,r){return N(this,t,e,!0,r);},i.prototype.writeDoubleBE=function(t,e,r){return N(this,t,e,!1,r);},i.prototype.copy=function(t,e,r,n){if(r||(r=0),n||0===n||(n=this.length),e>=t.length&&(e=t.length),e||(e=0),n>0&&r>n&&(n=r),n===r)return 0;if(0===t.length||0===this.length)return 0;if(0>e)throw new RangeError("targetStart out of bounds");if(0>r||r>=this.length)throw new RangeError("sourceStart out of bounds");if(0>n)throw new RangeError("sourceEnd out of bounds");n>this.length&&(n=this.length),t.length-e<n-r&&(n=t.length-e+r);var o=n-r;if(1e3>o||!i.TYPED_ARRAY_SUPPORT)for(var s=0;o>s;s++){t[s+e]=this[s+r];}else t._set(this.subarray(r,r+o),e);return o;},i.prototype.fill=function(t,e,r){if(t||(t=0),e||(e=0),r||(r=this.length),e>r)throw new RangeError("end < start");if(r!==e&&0!==this.length){if(0>e||e>=this.length)throw new RangeError("start out of bounds");if(0>r||r>this.length)throw new RangeError("end out of bounds");var n;if("number"==typeof t)for(n=e;r>n;n++){this[n]=t;}else {var i=B(t.toString()),o=i.length;for(n=e;r>n;n++){this[n]=i[n%o];}}return this;}},i.prototype.toArrayBuffer=function(){if("undefined"!=typeof Uint8Array){if(i.TYPED_ARRAY_SUPPORT)return new i(this).buffer;for(var t=new Uint8Array(this.length),e=0,r=t.length;r>e;e+=1){t[e]=this[e];}return t.buffer;}throw new TypeError("Buffer.toArrayBuffer not supported in this browser");};var G=i.prototype;i._augment=function(t){return t.constructor=i,t._isBuffer=!0,t._set=t.set,t.get=G.get,t.set=G.set,t.write=G.write,t.toString=G.toString,t.toLocaleString=G.toString,t.toJSON=G.toJSON,t.equals=G.equals,t.compare=G.compare,t.indexOf=G.indexOf,t.copy=G.copy,t.slice=G.slice,t.readUIntLE=G.readUIntLE,t.readUIntBE=G.readUIntBE,t.readUInt8=G.readUInt8,t.readUInt16LE=G.readUInt16LE,t.readUInt16BE=G.readUInt16BE,t.readUInt32LE=G.readUInt32LE,t.readUInt32BE=G.readUInt32BE,t.readIntLE=G.readIntLE,t.readIntBE=G.readIntBE,t.readInt8=G.readInt8,t.readInt16LE=G.readInt16LE,t.readInt16BE=G.readInt16BE,t.readInt32LE=G.readInt32LE,t.readInt32BE=G.readInt32BE,t.readFloatLE=G.readFloatLE,t.readFloatBE=G.readFloatBE,t.readDoubleLE=G.readDoubleLE,t.readDoubleBE=G.readDoubleBE,t.writeUInt8=G.writeUInt8,t.writeUIntLE=G.writeUIntLE,t.writeUIntBE=G.writeUIntBE,t.writeUInt16LE=G.writeUInt16LE,t.writeUInt16BE=G.writeUInt16BE,t.writeUInt32LE=G.writeUInt32LE,t.writeUInt32BE=G.writeUInt32BE,t.writeIntLE=G.writeIntLE,t.writeIntBE=G.writeIntBE,t.writeInt8=G.writeInt8,t.writeInt16LE=G.writeInt16LE,t.writeInt16BE=G.writeInt16BE,t.writeInt32LE=G.writeInt32LE,t.writeInt32BE=G.writeInt32BE,t.writeFloatLE=G.writeFloatLE,t.writeFloatBE=G.writeFloatBE,t.writeDoubleLE=G.writeDoubleLE,t.writeDoubleBE=G.writeDoubleBE,t.fill=G.fill,t.inspect=G.inspect,t.toArrayBuffer=G.toArrayBuffer,t;};var J=/[^+\/0-9A-z\-]/g;},{"base64-js":2,ieee754:3,"is-array":4}],4:[function(t,e,r){var n=Array.isArray,i=Object.prototype.toString;e.exports=n||function(t){return !!t&&"[object Array]"==i.call(t);};},{}],3:[function(t,e,r){r.read=function(t,e,r,n,i){var o,s,a=8*i-n-1,u=(1<<a)-1,c=u>>1,l=-7,h=r?i-1:0,p=r?-1:1,f=t[e+h];for(h+=p,o=f&(1<<-l)-1,f>>=-l,l+=a;l>0;o=256*o+t[e+h],h+=p,l-=8){}for(s=o&(1<<-l)-1,o>>=-l,l+=n;l>0;s=256*s+t[e+h],h+=p,l-=8){}if(0===o)o=1-c;else {if(o===u)return s?NaN:(f?-1:1)*(1/0);s+=Math.pow(2,n),o-=c;}return (f?-1:1)*s*Math.pow(2,o-n);},r.write=function(t,e,r,n,i,o){var s,a,u,c=8*o-i-1,l=(1<<c)-1,h=l>>1,p=23===i?Math.pow(2,-24)-Math.pow(2,-77):0,f=n?0:o-1,d=n?1:-1,y=0>e||0===e&&0>1/e?1:0;for(e=Math.abs(e),isNaN(e)||e===1/0?(a=isNaN(e)?1:0,s=l):(s=Math.floor(Math.log(e)/Math.LN2),e*(u=Math.pow(2,-s))<1&&(s--,u*=2),e+=s+h>=1?p/u:p*Math.pow(2,1-h),e*u>=2&&(s++,u/=2),s+h>=l?(a=0,s=l):s+h>=1?(a=(e*u-1)*Math.pow(2,i),s+=h):(a=e*Math.pow(2,h-1)*Math.pow(2,i),s=0));i>=8;t[r+f]=255&a,f+=d,a/=256,i-=8){}for(s=s<<i|a,c+=i;c>0;t[r+f]=255&s,f+=d,s/=256,c-=8){}t[r+f-d]|=128*y;};},{}],2:[function(t,e,r){var n="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";!function(t){"use strict";function e(t){var e=t.charCodeAt(0);return e===s||e===h?62:e===a||e===p?63:u>e?-1:u+10>e?e-u+26+26:l+26>e?e-l:c+26>e?e-c+26:void 0;}function r(t){function r(t){c[h++]=t;}var n,i,s,a,u,c;if(t.length%4>0)throw new Error("Invalid string. Length must be a multiple of 4");var l=t.length;u="="===t.charAt(l-2)?2:"="===t.charAt(l-1)?1:0,c=new o(3*t.length/4-u),s=u>0?t.length-4:t.length;var h=0;for(n=0,i=0;s>n;n+=4,i+=3){a=e(t.charAt(n))<<18|e(t.charAt(n+1))<<12|e(t.charAt(n+2))<<6|e(t.charAt(n+3)),r((16711680&a)>>16),r((65280&a)>>8),r(255&a);}return 2===u?(a=e(t.charAt(n))<<2|e(t.charAt(n+1))>>4,r(255&a)):1===u&&(a=e(t.charAt(n))<<10|e(t.charAt(n+1))<<4|e(t.charAt(n+2))>>2,r(a>>8&255),r(255&a)),c;}function i(t){function e(t){return n.charAt(t);}function r(t){return e(t>>18&63)+e(t>>12&63)+e(t>>6&63)+e(63&t);}var i,o,s,a=t.length%3,u="";for(i=0,s=t.length-a;s>i;i+=3){o=(t[i]<<16)+(t[i+1]<<8)+t[i+2],u+=r(o);}switch(a){case 1:o=t[t.length-1],u+=e(o>>2),u+=e(o<<4&63),u+="==";break;case 2:o=(t[t.length-2]<<8)+t[t.length-1],u+=e(o>>10),u+=e(o>>4&63),u+=e(o<<2&63),u+="=";}return u;}var o="undefined"!=typeof Uint8Array?Uint8Array:Array,s="+".charCodeAt(0),a="/".charCodeAt(0),u="0".charCodeAt(0),c="a".charCodeAt(0),l="A".charCodeAt(0),h="-".charCodeAt(0),p="_".charCodeAt(0);t.toByteArray=r,t.fromByteArray=i;}("undefined"==typeof r?this.base64js={}:r);},{}]},{},[]),_xamzrequire=function e(t,r,n){function i(s,a){if(!r[s]){if(!t[s]){var u="function"==typeof _xamzrequire&&_xamzrequire;if(!a&&u)return u(s,!0);if(o)return o(s,!0);var c=new Error("Cannot find module '"+s+"'");throw c.code="MODULE_NOT_FOUND",c;}var l=r[s]={exports:{}};t[s][0].call(l.exports,function(e){var r=t[s][1][e];return i(r?r:e);},l,l.exports,e,t,r,n);}return r[s].exports;}for(var o="function"==typeof _xamzrequire&&_xamzrequire,s=0;s<n.length;s++){i(n[s]);}return i;}({21:[function(t,e,r){var n=t("./core");n.apiLoader=function(t,e){return n.apiLoader.services[t][e];},n.apiLoader.services={},n.XML.Parser=t("./xml/browser_parser"),t("./http/xhr"),"undefined"!=typeof window&&(window.AWS=n),"undefined"!=typeof e&&(e.exports=n),"undefined"!=typeof self&&(self.AWS=n);},{"./core":24,"./http/xhr":38,"./xml/browser_parser":85}],85:[function(t,e,r){function n(){}function i(t,e){switch(e||(e={}),e.type){case "structure":return o(t,e);case "map":return s(t,e);case "list":return a(t,e);case void 0:case null:return c(t);default:return u(t,e);}}function o(t,e){var r={};return null===t?r:(l.each(e.members,function(e,n){if(n.isXmlAttribute){if(t.attributes.hasOwnProperty(n.name)){var o=t.attributes[n.name].value;r[e]=i({textContent:o},n);}}else {var s=n.flattened?t:t.getElementsByTagName(n.name)[0];s?r[e]=i(s,n):n.flattened||"list"!==n.type||(r[e]=n.defaultValue);}}),r);}function s(t,e){for(var r={},n=e.key.name||"key",o=e.value.name||"value",s=e.flattened?e.name:"entry",a=t.firstElementChild;a;){if(a.nodeName===s){var u=a.getElementsByTagName(n)[0].textContent,c=a.getElementsByTagName(o)[0];r[u]=i(c,e.value);}a=a.nextElementSibling;}return r;}function a(t,e){for(var r=[],n=e.flattened?e.name:e.member.name||"member",o=t.firstElementChild;o;){o.nodeName===n&&r.push(i(o,e.member)),o=o.nextElementSibling;}return r;}function u(t,e){if(t.getAttribute){var r=t.getAttribute("encoding");"base64"===r&&(e=new h.create({type:r}));}var n=t.textContent;return ""===n&&(n=null),"function"==typeof e.toType?e.toType(n):n;}function c(t){if(void 0===t||null===t)return "";if(!t.firstElementChild)return null===t.parentNode.parentNode?{}:0===t.childNodes.length?"":t.textContent;for(var e={type:"structure",members:{}},r=t.firstElementChild;r;){var n=r.nodeName;e.members.hasOwnProperty(n)?e.members[n].type="list":e.members[n]={name:n},r=r.nextElementSibling;}return o(t,e);}var l=t("../util"),h=t("../model/shape");n.prototype.parse=function(t,e){if(""===t.replace(/^\s+/,""))return {};var r,n;try{if(window.DOMParser){try{var o=new DOMParser();r=o.parseFromString(t,"text/xml");}catch(s){throw l.error(new Error("Parse error in document"),{originalError:s,code:"XMLParserError",retryable:!0});}if(null===r.documentElement)throw l.error(new Error("Cannot parse empty document."),{code:"XMLParserError",retryable:!0});var a=r.getElementsByTagName("parsererror")[0];if(a&&(a.parentNode===r||"body"===a.parentNode.nodeName||a.parentNode.parentNode===r||"body"===a.parentNode.parentNode.nodeName)){var u=a.getElementsByTagName("div")[0]||a;throw l.error(new Error(u.textContent||"Parser error in document"),{code:"XMLParserError",retryable:!0});}}else {if(!window.ActiveXObject)throw new Error("Cannot load XML parser");if(r=new window.ActiveXObject("Microsoft.XMLDOM"),r.async=!1,!r.loadXML(t))throw l.error(new Error("Parse error in document"),{code:"XMLParserError",retryable:!0});}}catch(c){n=c;}if(r&&r.documentElement&&!n){var h=i(r.documentElement,e),p=r.getElementsByTagName("ResponseMetadata")[0];return p&&(h.ResponseMetadata=i(p,{})),h;}if(n)throw l.error(n||new Error(),{code:"XMLParserError",retryable:!0});return {};},e.exports=n;},{"../model/shape":46,"../util":84}],38:[function(t,e,r){var n=t("../core"),i=t("events").EventEmitter;t("../http"),n.XHRClient=n.util.inherit({handleRequest:function handleRequest(t,e,r,o){var s=this,a=t.endpoint,u=new i(),c=a.protocol+"//"+a.hostname;80!==a.port&&443!==a.port&&(c+=":"+a.port),c+=t.path;var l=new XMLHttpRequest(),h=!1;t.stream=l,l.addEventListener("readystatechange",function(){try{if(0===l.status)return;}catch(t){return;}if(this.readyState>=this.HEADERS_RECEIVED&&!h){try{l.responseType="arraybuffer";}catch(t){}u.statusCode=l.status,u.headers=s.parseHeaders(l.getAllResponseHeaders()),u.emit("headers",u.statusCode,u.headers),h=!0;}this.readyState===this.DONE&&s.finishRequest(l,u);},!1),l.upload.addEventListener("progress",function(t){u.emit("sendProgress",t);}),l.addEventListener("progress",function(t){u.emit("receiveProgress",t);},!1),l.addEventListener("timeout",function(){o(n.util.error(new Error("Timeout"),{code:"TimeoutError"}));},!1),l.addEventListener("error",function(){o(n.util.error(new Error("Network Failure"),{code:"NetworkingError"}));},!1),r(u),l.open(t.method,c,e.xhrAsync!==!1),n.util.each(t.headers,function(t,e){"Content-Length"!==t&&"User-Agent"!==t&&"Host"!==t&&l.setRequestHeader(t,e);}),e.timeout&&e.xhrAsync!==!1&&(l.timeout=e.timeout),e.xhrWithCredentials&&(l.withCredentials=!0);try{l.send(t.body);}catch(p){if(!t.body||"object"!=_typeof(t.body.buffer))throw p;l.send(t.body.buffer);}return u;},parseHeaders:function parseHeaders(t){var e={};return n.util.arrayEach(t.split(/\r?\n/),function(t){var r=t.split(":",1)[0],n=t.substring(r.length+2);r.length>0&&(e[r.toLowerCase()]=n);}),e;},finishRequest:function finishRequest(t,e){var r;if("arraybuffer"===t.responseType&&t.response){var i=t.response;r=new n.util.Buffer(i.byteLength);for(var o=new Uint8Array(i),s=0;s<r.length;++s){r[s]=o[s];}}try{r||"string"!=typeof t.responseText||(r=new n.util.Buffer(t.responseText));}catch(a){}r&&e.emit("data",r),e.emit("end");}}),n.HttpClient.prototype=n.XHRClient.prototype,n.HttpClient.streamsApiVersion=1;},{"../core":24,"../http":37,events:11}],11:[function(t,e,r){function n(){this._events=this._events||{},this._maxListeners=this._maxListeners||void 0;}function i(t){return "function"==typeof t;}function o(t){return "number"==typeof t;}function s(t){return "object"==(typeof t==="undefined"?"undefined":_typeof(t))&&null!==t;}function a(t){return void 0===t;}e.exports=n,n.EventEmitter=n,n.prototype._events=void 0,n.prototype._maxListeners=void 0,n.defaultMaxListeners=10,n.prototype.setMaxListeners=function(t){if(!o(t)||0>t||isNaN(t))throw TypeError("n must be a positive number");return this._maxListeners=t,this;},n.prototype.emit=function(t){var e,r,n,o,u,c;if(this._events||(this._events={}),"error"===t&&(!this._events.error||s(this._events.error)&&!this._events.error.length)){if(e=arguments[1],e instanceof Error)throw e;throw TypeError('Uncaught, unspecified "error" event.');}if(r=this._events[t],a(r))return !1;if(i(r))switch(arguments.length){case 1:r.call(this);break;case 2:r.call(this,arguments[1]);break;case 3:r.call(this,arguments[1],arguments[2]);break;default:for(n=arguments.length,o=new Array(n-1),u=1;n>u;u++){o[u-1]=arguments[u];}r.apply(this,o);}else if(s(r)){for(n=arguments.length,o=new Array(n-1),u=1;n>u;u++){o[u-1]=arguments[u];}for(c=r.slice(),n=c.length,u=0;n>u;u++){c[u].apply(this,o);}}return !0;},n.prototype.addListener=function(t,e){var r;if(!i(e))throw TypeError("listener must be a function");if(this._events||(this._events={}),this._events.newListener&&this.emit("newListener",t,i(e.listener)?e.listener:e),this._events[t]?s(this._events[t])?this._events[t].push(e):this._events[t]=[this._events[t],e]:this._events[t]=e,s(this._events[t])&&!this._events[t].warned){var r;r=a(this._maxListeners)?n.defaultMaxListeners:this._maxListeners,r&&r>0&&this._events[t].length>r&&(this._events[t].warned=!0,console.error("(node) warning: possible EventEmitter memory leak detected. %d listeners added. Use emitter.setMaxListeners() to increase limit.",this._events[t].length),"function"==typeof console.trace&&console.trace());}return this;},n.prototype.on=n.prototype.addListener,n.prototype.once=function(t,e){function r(){this.removeListener(t,r),n||(n=!0,e.apply(this,arguments));}if(!i(e))throw TypeError("listener must be a function");var n=!1;return r.listener=e,this.on(t,r),this;},n.prototype.removeListener=function(t,e){var r,n,o,a;if(!i(e))throw TypeError("listener must be a function");if(!this._events||!this._events[t])return this;if(r=this._events[t],o=r.length,n=-1,r===e||i(r.listener)&&r.listener===e)delete this._events[t],this._events.removeListener&&this.emit("removeListener",t,e);else if(s(r)){for(a=o;a-->0;){if(r[a]===e||r[a].listener&&r[a].listener===e){n=a;break;}}if(0>n)return this;1===r.length?(r.length=0,delete this._events[t]):r.splice(n,1),this._events.removeListener&&this.emit("removeListener",t,e);}return this;},n.prototype.removeAllListeners=function(t){var e,r;if(!this._events)return this;if(!this._events.removeListener)return 0===arguments.length?this._events={}:this._events[t]&&delete this._events[t],this;if(0===arguments.length){for(e in this._events){"removeListener"!==e&&this.removeAllListeners(e);}return this.removeAllListeners("removeListener"),this._events={},this;}if(r=this._events[t],i(r))this.removeListener(t,r);else for(;r.length;){this.removeListener(t,r[r.length-1]);}return delete this._events[t],this;},n.prototype.listeners=function(t){var e;return e=this._events&&this._events[t]?i(this._events[t])?[this._events[t]]:this._events[t].slice():[];},n.listenerCount=function(t,e){var r;return r=t._events&&t._events[e]?i(t._events[e])?1:t._events[e].length:0;};},{}]},{},[21]);AWS.apiLoader.services.cognitoidentity={},AWS.CognitoIdentity=AWS.Service.defineService("cognitoidentity",["2014-06-30"]),_xamzrequire=function e(t,n,r){function i(u,a){if(!n[u]){if(!t[u]){var c="function"==typeof _xamzrequire&&_xamzrequire;if(!a&&c)return c(u,!0);if(o)return o(u,!0);var d=new Error("Cannot find module '"+u+"'");throw d.code="MODULE_NOT_FOUND",d;}var f=n[u]={exports:{}};t[u][0].call(f.exports,function(e){var n=t[u][1][e];return i(n?n:e);},f,f.exports,e,t,n,r);}return n[u].exports;}for(var o="function"==typeof _xamzrequire&&_xamzrequire,u=0;u<r.length;u++){i(r[u]);}return i;}({65:[function(e,t,n){var r=e("../core");r.util.update(r.CognitoIdentity.prototype,{getOpenIdToken:function getOpenIdToken(e,t){return this.makeUnauthenticatedRequest("getOpenIdToken",e,t);},getId:function getId(e,t){return this.makeUnauthenticatedRequest("getId",e,t);},getCredentialsForIdentity:function getCredentialsForIdentity(e,t){return this.makeUnauthenticatedRequest("getCredentialsForIdentity",e,t);}});},{"../core":24}]},{},[65]);AWS.apiLoader.services.cognitoidentity["2014-06-30"]={version:"2.0",metadata:{apiVersion:"2014-06-30",endpointPrefix:"cognito-identity",jsonVersion:"1.1",serviceFullName:"Amazon Cognito Identity",signatureVersion:"v4",targetPrefix:"AWSCognitoIdentityService",protocol:"json"},operations:{CreateIdentityPool:{input:{type:"structure",required:["IdentityPoolName","AllowUnauthenticatedIdentities"],members:{IdentityPoolName:{},AllowUnauthenticatedIdentities:{type:"boolean"},SupportedLoginProviders:{shape:"S4"},DeveloperProviderName:{},OpenIdConnectProviderARNs:{shape:"S8"}}},output:{shape:"Sa"},http:{}},DeleteIdentities:{input:{type:"structure",required:["IdentityIdsToDelete"],members:{IdentityIdsToDelete:{type:"list",member:{}}}},output:{type:"structure",members:{UnprocessedIdentityIds:{type:"list",member:{type:"structure",members:{IdentityId:{},ErrorCode:{}}}}}},http:{}},DeleteIdentityPool:{input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{}}},http:{}},DescribeIdentity:{input:{type:"structure",required:["IdentityId"],members:{IdentityId:{}}},output:{shape:"Sl"},http:{}},DescribeIdentityPool:{input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{}}},output:{shape:"Sa"},http:{}},GetCredentialsForIdentity:{input:{type:"structure",required:["IdentityId"],members:{IdentityId:{},Logins:{shape:"Sq"}}},output:{type:"structure",members:{IdentityId:{},Credentials:{type:"structure",members:{AccessKeyId:{},SecretKey:{},SessionToken:{},Expiration:{type:"timestamp"}}}}},http:{}},GetId:{input:{type:"structure",required:["IdentityPoolId"],members:{AccountId:{},IdentityPoolId:{},Logins:{shape:"Sq"}}},output:{type:"structure",members:{IdentityId:{}}},http:{}},GetIdentityPoolRoles:{input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{}}},output:{type:"structure",members:{IdentityPoolId:{},Roles:{shape:"S12"}}},http:{}},GetOpenIdToken:{input:{type:"structure",required:["IdentityId"],members:{IdentityId:{},Logins:{shape:"Sq"}}},output:{type:"structure",members:{IdentityId:{},Token:{}}},http:{}},GetOpenIdTokenForDeveloperIdentity:{input:{type:"structure",required:["IdentityPoolId","Logins"],members:{IdentityPoolId:{},IdentityId:{},Logins:{shape:"Sq"},TokenDuration:{type:"long"}}},output:{type:"structure",members:{IdentityId:{},Token:{}}},http:{}},ListIdentities:{input:{type:"structure",required:["IdentityPoolId","MaxResults"],members:{IdentityPoolId:{},MaxResults:{type:"integer"},NextToken:{},HideDisabled:{type:"boolean"}}},output:{type:"structure",members:{IdentityPoolId:{},Identities:{type:"list",member:{shape:"Sl"}},NextToken:{}}},http:{}},ListIdentityPools:{input:{type:"structure",required:["MaxResults"],members:{MaxResults:{type:"integer"},NextToken:{}}},output:{type:"structure",members:{IdentityPools:{type:"list",member:{type:"structure",members:{IdentityPoolId:{},IdentityPoolName:{}}}},NextToken:{}}},http:{}},LookupDeveloperIdentity:{input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{},IdentityId:{},DeveloperUserIdentifier:{},MaxResults:{type:"integer"},NextToken:{}}},output:{type:"structure",members:{IdentityId:{},DeveloperUserIdentifierList:{type:"list",member:{}},NextToken:{}}},http:{}},MergeDeveloperIdentities:{input:{type:"structure",required:["SourceUserIdentifier","DestinationUserIdentifier","DeveloperProviderName","IdentityPoolId"],members:{SourceUserIdentifier:{},DestinationUserIdentifier:{},DeveloperProviderName:{},IdentityPoolId:{}}},output:{type:"structure",members:{IdentityId:{}}},http:{}},SetIdentityPoolRoles:{input:{type:"structure",required:["IdentityPoolId","Roles"],members:{IdentityPoolId:{},Roles:{shape:"S12"}}},http:{}},UnlinkDeveloperIdentity:{input:{type:"structure",required:["IdentityId","IdentityPoolId","DeveloperProviderName","DeveloperUserIdentifier"],members:{IdentityId:{},IdentityPoolId:{},DeveloperProviderName:{},DeveloperUserIdentifier:{}}},http:{}},UnlinkIdentity:{input:{type:"structure",required:["IdentityId","Logins","LoginsToRemove"],members:{IdentityId:{},Logins:{shape:"Sq"},LoginsToRemove:{shape:"Sm"}}},http:{}},UpdateIdentityPool:{input:{shape:"Sa"},output:{shape:"Sa"},http:{}}},shapes:{S4:{type:"map",key:{},value:{}},S8:{type:"list",member:{}},Sa:{type:"structure",required:["IdentityPoolId","IdentityPoolName","AllowUnauthenticatedIdentities"],members:{IdentityPoolId:{},IdentityPoolName:{},AllowUnauthenticatedIdentities:{type:"boolean"},SupportedLoginProviders:{shape:"S4"},DeveloperProviderName:{},OpenIdConnectProviderARNs:{shape:"S8"}}},Sl:{type:"structure",members:{IdentityId:{},Logins:{shape:"Sm"},CreationDate:{type:"timestamp"},LastModifiedDate:{type:"timestamp"}}},Sm:{type:"list",member:{}},Sq:{type:"map",key:{},value:{}},S12:{type:"map",key:{},value:{}}},examples:{}};AWS.apiLoader.services.cognitosync={},AWS.CognitoSync=AWS.Service.defineService("cognitosync",["2014-06-30"]);AWS.apiLoader.services.cognitosync["2014-06-30"]={version:"2.0",metadata:{apiVersion:"2014-06-30",endpointPrefix:"cognito-sync",jsonVersion:"1.1",serviceFullName:"Amazon Cognito Sync",signatureVersion:"v4",protocol:"rest-json"},operations:{BulkPublish:{http:{requestUri:"/identitypools/{IdentityPoolId}/bulkpublish",responseCode:200},input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"}}},output:{type:"structure",members:{IdentityPoolId:{}}}},DeleteDataset:{http:{method:"DELETE",requestUri:"/identitypools/{IdentityPoolId}/identities/{IdentityId}/datasets/{DatasetName}",responseCode:200},input:{type:"structure",required:["IdentityPoolId","IdentityId","DatasetName"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},IdentityId:{location:"uri",locationName:"IdentityId"},DatasetName:{location:"uri",locationName:"DatasetName"}}},output:{type:"structure",members:{Dataset:{shape:"S8"}}}},DescribeDataset:{http:{method:"GET",requestUri:"/identitypools/{IdentityPoolId}/identities/{IdentityId}/datasets/{DatasetName}",responseCode:200},input:{type:"structure",required:["IdentityPoolId","IdentityId","DatasetName"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},IdentityId:{location:"uri",locationName:"IdentityId"},DatasetName:{location:"uri",locationName:"DatasetName"}}},output:{type:"structure",members:{Dataset:{shape:"S8"}}}},DescribeIdentityPoolUsage:{http:{method:"GET",requestUri:"/identitypools/{IdentityPoolId}",responseCode:200},input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"}}},output:{type:"structure",members:{IdentityPoolUsage:{shape:"Sg"}}}},DescribeIdentityUsage:{http:{method:"GET",requestUri:"/identitypools/{IdentityPoolId}/identities/{IdentityId}",responseCode:200},input:{type:"structure",required:["IdentityPoolId","IdentityId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},IdentityId:{location:"uri",locationName:"IdentityId"}}},output:{type:"structure",members:{IdentityUsage:{type:"structure",members:{IdentityId:{},IdentityPoolId:{},LastModifiedDate:{type:"timestamp"},DatasetCount:{type:"integer"},DataStorage:{type:"long"}}}}}},GetBulkPublishDetails:{http:{requestUri:"/identitypools/{IdentityPoolId}/getBulkPublishDetails",responseCode:200},input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"}}},output:{type:"structure",members:{IdentityPoolId:{},BulkPublishStartTime:{type:"timestamp"},BulkPublishCompleteTime:{type:"timestamp"},BulkPublishStatus:{},FailureMessage:{}}}},GetCognitoEvents:{http:{method:"GET",requestUri:"/identitypools/{IdentityPoolId}/events",responseCode:200},input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"}}},output:{type:"structure",members:{Events:{shape:"Sq"}}}},GetIdentityPoolConfiguration:{http:{method:"GET",requestUri:"/identitypools/{IdentityPoolId}/configuration",responseCode:200},input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"}}},output:{type:"structure",members:{IdentityPoolId:{},PushSync:{shape:"Sv"},CognitoStreams:{shape:"Sz"}}}},ListDatasets:{http:{method:"GET",requestUri:"/identitypools/{IdentityPoolId}/identities/{IdentityId}/datasets",responseCode:200},input:{type:"structure",required:["IdentityId","IdentityPoolId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},IdentityId:{location:"uri",locationName:"IdentityId"},NextToken:{location:"querystring",locationName:"nextToken"},MaxResults:{location:"querystring",locationName:"maxResults",type:"integer"}}},output:{type:"structure",members:{Datasets:{type:"list",member:{shape:"S8"}},Count:{type:"integer"},NextToken:{}}}},ListIdentityPoolUsage:{http:{method:"GET",requestUri:"/identitypools",responseCode:200},input:{type:"structure",members:{NextToken:{location:"querystring",locationName:"nextToken"},MaxResults:{location:"querystring",locationName:"maxResults",type:"integer"}}},output:{type:"structure",members:{IdentityPoolUsages:{type:"list",member:{shape:"Sg"}},MaxResults:{type:"integer"},Count:{type:"integer"},NextToken:{}}}},ListRecords:{http:{method:"GET",requestUri:"/identitypools/{IdentityPoolId}/identities/{IdentityId}/datasets/{DatasetName}/records",responseCode:200},input:{type:"structure",required:["IdentityPoolId","IdentityId","DatasetName"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},IdentityId:{location:"uri",locationName:"IdentityId"},DatasetName:{location:"uri",locationName:"DatasetName"},LastSyncCount:{location:"querystring",locationName:"lastSyncCount",type:"long"},NextToken:{location:"querystring",locationName:"nextToken"},MaxResults:{location:"querystring",locationName:"maxResults",type:"integer"},SyncSessionToken:{location:"querystring",locationName:"syncSessionToken"}}},output:{type:"structure",members:{Records:{shape:"S1c"},NextToken:{},Count:{type:"integer"},DatasetSyncCount:{type:"long"},LastModifiedBy:{},MergedDatasetNames:{type:"list",member:{}},DatasetExists:{type:"boolean"},DatasetDeletedAfterRequestedSyncCount:{type:"boolean"},SyncSessionToken:{}}}},RegisterDevice:{http:{requestUri:"/identitypools/{IdentityPoolId}/identity/{IdentityId}/device",responseCode:200},input:{type:"structure",required:["IdentityPoolId","IdentityId","Platform","Token"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},IdentityId:{location:"uri",locationName:"IdentityId"},Platform:{},Token:{}}},output:{type:"structure",members:{DeviceId:{}}}},SetCognitoEvents:{http:{requestUri:"/identitypools/{IdentityPoolId}/events",responseCode:200},input:{type:"structure",required:["IdentityPoolId","Events"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},Events:{shape:"Sq"}}}},SetIdentityPoolConfiguration:{http:{requestUri:"/identitypools/{IdentityPoolId}/configuration",responseCode:200},input:{type:"structure",required:["IdentityPoolId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},PushSync:{shape:"Sv"},CognitoStreams:{shape:"Sz"}}},output:{type:"structure",members:{IdentityPoolId:{},PushSync:{shape:"Sv"},CognitoStreams:{shape:"Sz"}}}},SubscribeToDataset:{http:{requestUri:"/identitypools/{IdentityPoolId}/identities/{IdentityId}/datasets/{DatasetName}/subscriptions/{DeviceId}",responseCode:200},input:{type:"structure",required:["IdentityPoolId","IdentityId","DatasetName","DeviceId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},IdentityId:{location:"uri",locationName:"IdentityId"},DatasetName:{location:"uri",locationName:"DatasetName"},DeviceId:{location:"uri",locationName:"DeviceId"}}},output:{type:"structure",members:{}}},UnsubscribeFromDataset:{http:{method:"DELETE",requestUri:"/identitypools/{IdentityPoolId}/identities/{IdentityId}/datasets/{DatasetName}/subscriptions/{DeviceId}",responseCode:200},input:{type:"structure",required:["IdentityPoolId","IdentityId","DatasetName","DeviceId"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},IdentityId:{location:"uri",locationName:"IdentityId"},DatasetName:{location:"uri",locationName:"DatasetName"},DeviceId:{location:"uri",locationName:"DeviceId"}}},output:{type:"structure",members:{}}},UpdateRecords:{http:{requestUri:"/identitypools/{IdentityPoolId}/identities/{IdentityId}/datasets/{DatasetName}",responseCode:200},input:{type:"structure",required:["IdentityPoolId","IdentityId","DatasetName","SyncSessionToken"],members:{IdentityPoolId:{location:"uri",locationName:"IdentityPoolId"},IdentityId:{location:"uri",locationName:"IdentityId"},DatasetName:{location:"uri",locationName:"DatasetName"},DeviceId:{},RecordPatches:{type:"list",member:{type:"structure",required:["Op","Key","SyncCount"],members:{Op:{},Key:{},Value:{},SyncCount:{type:"long"},DeviceLastModifiedDate:{type:"timestamp"}}}},SyncSessionToken:{},ClientContext:{location:"header",locationName:"x-amz-Client-Context"}}},output:{type:"structure",members:{Records:{shape:"S1c"}}}}},shapes:{S8:{type:"structure",members:{IdentityId:{},DatasetName:{},CreationDate:{type:"timestamp"},LastModifiedDate:{type:"timestamp"},LastModifiedBy:{},DataStorage:{type:"long"},NumRecords:{type:"long"}}},Sg:{type:"structure",members:{IdentityPoolId:{},SyncSessionsCount:{type:"long"},DataStorage:{type:"long"},LastModifiedDate:{type:"timestamp"}}},Sq:{type:"map",key:{},value:{}},Sv:{type:"structure",members:{ApplicationArns:{type:"list",member:{}},RoleArn:{}}},Sz:{type:"structure",members:{StreamName:{},RoleArn:{},StreamingStatus:{}}},S1c:{type:"list",member:{type:"structure",members:{Key:{},Value:{},SyncCount:{type:"long"},LastModifiedDate:{type:"timestamp"},LastModifiedBy:{},DeviceLastModifiedDate:{type:"timestamp"}}}}},examples:{}};AWS.apiLoader.services.sts={},AWS.STS=AWS.Service.defineService("sts",["2011-06-15"]),_xamzrequire=function e(r,t,n){function i(o,a){if(!t[o]){if(!r[o]){var u="function"==typeof _xamzrequire&&_xamzrequire;if(!a&&u)return u(o,!0);if(s)return s(o,!0);var c=new Error("Cannot find module '"+o+"'");throw c.code="MODULE_NOT_FOUND",c;}var d=t[o]={exports:{}};r[o][0].call(d.exports,function(e){var t=r[o][1][e];return i(t?t:e);},d,d.exports,e,r,t,n);}return t[o].exports;}for(var s="function"==typeof _xamzrequire&&_xamzrequire,o=0;o<n.length;o++){i(n[o]);}return i;}({74:[function(e,r,t){var n=e("../core");n.util.update(n.STS.prototype,{credentialsFrom:function credentialsFrom(e,r){return e?(r||(r=new n.TemporaryCredentials()),r.expired=!1,r.accessKeyId=e.Credentials.AccessKeyId,r.secretAccessKey=e.Credentials.SecretAccessKey,r.sessionToken=e.Credentials.SessionToken,r.expireTime=e.Credentials.Expiration,r):null;},assumeRoleWithWebIdentity:function assumeRoleWithWebIdentity(e,r){return this.makeUnauthenticatedRequest("assumeRoleWithWebIdentity",e,r);},assumeRoleWithSAML:function assumeRoleWithSAML(e,r){return this.makeUnauthenticatedRequest("assumeRoleWithSAML",e,r);}});},{"../core":24}]},{},[74]);AWS.apiLoader.services.sts["2011-06-15"]={version:"2.0",metadata:{apiVersion:"2011-06-15",endpointPrefix:"sts",globalEndpoint:"sts.amazonaws.com",protocol:"query",serviceAbbreviation:"AWS STS",serviceFullName:"AWS Security Token Service",signatureVersion:"v4",xmlNamespace:"https://sts.amazonaws.com/doc/2011-06-15/"},operations:{AssumeRole:{input:{type:"structure",required:["RoleArn","RoleSessionName"],members:{RoleArn:{},RoleSessionName:{},Policy:{},DurationSeconds:{type:"integer"},ExternalId:{},SerialNumber:{},TokenCode:{}}},output:{resultWrapper:"AssumeRoleResult",type:"structure",members:{Credentials:{shape:"Sa"},AssumedRoleUser:{shape:"Sf"},PackedPolicySize:{type:"integer"}}},http:{}},AssumeRoleWithSAML:{input:{type:"structure",required:["RoleArn","PrincipalArn","SAMLAssertion"],members:{RoleArn:{},PrincipalArn:{},SAMLAssertion:{},Policy:{},DurationSeconds:{type:"integer"}}},output:{resultWrapper:"AssumeRoleWithSAMLResult",type:"structure",members:{Credentials:{shape:"Sa"},AssumedRoleUser:{shape:"Sf"},PackedPolicySize:{type:"integer"},Subject:{},SubjectType:{},Issuer:{},Audience:{},NameQualifier:{}}},http:{}},AssumeRoleWithWebIdentity:{input:{type:"structure",required:["RoleArn","RoleSessionName","WebIdentityToken"],members:{RoleArn:{},RoleSessionName:{},WebIdentityToken:{},ProviderId:{},Policy:{},DurationSeconds:{type:"integer"}}},output:{resultWrapper:"AssumeRoleWithWebIdentityResult",type:"structure",members:{Credentials:{shape:"Sa"},SubjectFromWebIdentityToken:{},AssumedRoleUser:{shape:"Sf"},PackedPolicySize:{type:"integer"},Provider:{},Audience:{}}},http:{}},DecodeAuthorizationMessage:{input:{type:"structure",required:["EncodedMessage"],members:{EncodedMessage:{}}},output:{resultWrapper:"DecodeAuthorizationMessageResult",type:"structure",members:{DecodedMessage:{}}},http:{}},GetFederationToken:{input:{type:"structure",required:["Name"],members:{Name:{},Policy:{},DurationSeconds:{type:"integer"}}},output:{resultWrapper:"GetFederationTokenResult",type:"structure",members:{Credentials:{shape:"Sa"},FederatedUser:{type:"structure",required:["FederatedUserId","Arn"],members:{FederatedUserId:{},Arn:{}}},PackedPolicySize:{type:"integer"}}},http:{}},GetSessionToken:{input:{type:"structure",members:{DurationSeconds:{type:"integer"},SerialNumber:{},TokenCode:{}}},output:{resultWrapper:"GetSessionTokenResult",type:"structure",members:{Credentials:{shape:"Sa"}}},http:{}}},shapes:{Sa:{type:"structure",required:["AccessKeyId","SecretAccessKey","SessionToken","Expiration"],members:{AccessKeyId:{},SecretAccessKey:{},SessionToken:{},Expiration:{type:"timestamp"}}},Sf:{type:"structure",required:["AssumedRoleId","Arn"],members:{AssumedRoleId:{},Arn:{}}}}};
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}]},{},[110])(110)
+},{}]},{},[83])(83)
 });
