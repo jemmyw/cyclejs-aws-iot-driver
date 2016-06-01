@@ -3,6 +3,7 @@ import SigV4Utils from './sig'
 import mqtt from 'mqtt'
 import R from 'ramda'
 import {Observable, Subject, ReplaySubject} from 'rx'
+import RxAdapter from '@cycle/rx-adapter'
 
 import '../vendor/aws-sdk'
 const AWS = window.AWS
@@ -184,11 +185,16 @@ function makeIotDriver(options) {
   /**
   * Subscribe to a topic
   */
-  function subscribeTopic(topic) {
+  const subscribeTopic = runStreamAdapter => topic => {
     subscriptionSource$.onNext(topic)
 
-    return messages$
+    const topicStream$ = messages$
       .filter(R.propEq('topic', topic))
+
+    return runStreamAdapter.adapt(
+      topicStream$,
+      RxAdapter.streamSubscribe
+    )
   }
 
   /**
@@ -196,14 +202,22 @@ function makeIotDriver(options) {
   *   format of ```{topic: 'topic_name', message: 'message string'}```
   * @returns {Observable} Observable of messages from all subscribed topics
   */
-  return function iotDriver(events$) {
+  function iotDriver(events$, runStreamAdapter) {
     events$.subscribe(event => publishSource$.onNext(event))
 
-    const out$ = messages$.map(R.identity).share()
-    out$.topic = subscribeTopic
+    const responses$$ = runStreamAdapter.adapt(
+      messages$.map(R.identity).share(),
+      RxAdapter.streamSubscribe
+    )
 
-    return out$
+    return {
+      responses$$,
+      topic: subscribeTopic(runStreamAdapter),
+    }
   }
+
+  iotDriver.streamAdapter = RxAdapter
+  return iotDriver
 }
 
 export {makeIotDriver}
